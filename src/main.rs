@@ -17,6 +17,10 @@ use vulkano::{
     sync,
     sync::GpuFuture,
     VulkanObject,
+    descriptor::{
+        descriptor_set::PersistentDescriptorSet,
+        pipeline_layout::PipelineLayoutAbstract,
+    }
 };
 
 use image::{ImageBuffer, Rgba};
@@ -101,13 +105,13 @@ impl<'a> Game<'a> {
 }
 
 fn main() {
-    std::env::set_var("SDL_VIDEODRIVER", "wayland");
+    //std::env::set_var("SDL_VIDEODRIVER", "wayland");
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
     let window = video_subsystem
-        .window("rust-sdl2 demo", 800, 600)
+        .window("stupid horse", 800, 600)
         .vulkan()
         .build()
         .unwrap();
@@ -124,7 +128,7 @@ fn main() {
         .capabilities(game.phys_gpu)
         .expect("failed to get surface capabilities");
 
-    let dims = caps.current_extent.unwrap_or([1280, 1024]);
+    let dims = caps.current_extent.unwrap_or([800, 600]);
     let alpha = caps.supported_composite_alpha.iter().next().unwrap();
     let format = caps.supported_formats[0];
 
@@ -143,26 +147,21 @@ fn main() {
         FullscreenExclusive::Default,
         true,
         format.1,
-    )
-    .expect("failed to create swapchain");
+    ).expect("failed to create swapchain");
 
     let render_pass = Arc::new(
         vulkano::single_pass_renderpass!(
-        game.gpu.clone(),
-        attachments: {
-            color: {
-                load: Clear,
-                store: Store,
-                format: swapchain.format(),
-                samples: 1,
-            }
-        },
-        pass: {
-            color: [color],
-            depth_stencil: {}
-        }
-        )
-        .unwrap(),
+            game.gpu.clone(),
+            attachments: {
+                color: {
+                    load: Clear,
+                    store: Store,
+                    format: swapchain.format(),
+                    samples: 1,
+                }
+            },
+            pass: {color: [color], depth_stencil: {}}
+        ).unwrap()
     );
 
     let framebuffers = images
@@ -216,6 +215,19 @@ fn main() {
         CpuAccessibleBuffer::from_iter(game.gpu.clone(), BufferUsage::all(), false, verts.iter().cloned()).unwrap()
     };
 
+    /*
+    let layout = pipeline.descriptor_set_layout(0).unwrap();
+    let mut pool = PersistentDescriptorSet::start(*layout).build().unwrap();
+    let uniform_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 5.0 as f32).unwrap();
+    let descriptor_set = Arc::new(pool.next().add_buffer(uniform_buf).unwrap().build().unwrap());
+    */
+
+    let layout = pipeline.descriptor_set_layout(0).unwrap();
+    let uniform_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0 as f32).unwrap();
+    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+        .add_buffer(uniform_buf.clone()).unwrap()
+        .build().unwrap());
+
     'running: loop {
         for event in event_pump.poll_iter() {
             match event {
@@ -223,40 +235,42 @@ fn main() {
                 Event::MouseMotion { .. } => (),
                 _ => println!("{:?}", event),
             }
-            prev_frame_end.as_mut().unwrap().cleanup_finished();
+        }
 
-            let (image_num, suboptimal, acquire_future) =
-                swapchain::acquire_next_image(swapchain.clone(), None).unwrap();
+        prev_frame_end.as_mut().unwrap().cleanup_finished();
 
-            let fb = framebuffers[image_num].clone();
+        {
+            *uniform_buf.write().unwrap() += 0.1;
+        }
 
-            let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(game.gpu.clone(), game.queue.family())
-                .unwrap()
-                .begin_render_pass(fb, false, clear_values.to_vec())
-                .unwrap()
-                .draw(pipeline.clone(), &dyn_state, vert_buf.clone(), (), ())
-                .unwrap()
-                .end_render_pass()
-                .unwrap()
-                .build()
-                .unwrap();
+        let (image_num, suboptimal, acquire_future) =
+            swapchain::acquire_next_image(swapchain.clone(), None).unwrap();
 
-            let future = prev_frame_end
-                .take()
-                .unwrap()
-                .join(acquire_future)
-                .then_execute(game.queue.clone(), command_buffer)
-                .unwrap()
-                .then_swapchain_present(game.queue.clone(), swapchain.clone(), image_num)
-                .then_signal_fence_and_flush();
+        let fb = framebuffers[image_num].clone();
 
-            match future {
-                Ok(future) => {
-                    prev_frame_end.replace(Box::new(future));
-                }
-                Err(e) => {
-                    panic!("{:?}", e);
-                }
+        let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(game.gpu.clone(), game.queue.family())
+            .unwrap()
+            .begin_render_pass(fb, false, clear_values.to_vec())
+            .unwrap()
+            .draw(pipeline.clone(), &dyn_state, vert_buf.clone(), descriptor_set.clone(), ())
+            .unwrap()
+            .end_render_pass()
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let future = prev_frame_end.take().unwrap()
+            .join(acquire_future)
+            .then_execute(game.queue.clone(), command_buffer).unwrap()
+            .then_swapchain_present(game.queue.clone(), swapchain.clone(), image_num)
+            .then_signal_fence_and_flush();
+
+        match future {
+            Ok(future) => {
+                prev_frame_end.replace(Box::new(future));
+            }
+            Err(e) => {
+                panic!("{:?}", e);
             }
         }
         std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60));

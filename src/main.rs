@@ -38,8 +38,15 @@ mod vulkano_sdl2;
 
 #[derive(Default, Copy, Clone)]
 struct Vertex {
-    position: [f32; 2],
+    position: (f32, f32)
 }
+
+impl Vertex {
+    pub fn new(x: f32, y: f32) -> Self {
+        Vertex { position: (x, y) }
+    }
+}
+
 vulkano::impl_vertex!(Vertex, position);
 
 struct Game<'a> {
@@ -104,6 +111,8 @@ impl<'a> Game<'a> {
     }
 }
 
+static DIMS: (u32, u32) = (600, 600);
+
 fn main() {
     //std::env::set_var("SDL_VIDEODRIVER", "wayland");
 
@@ -111,7 +120,7 @@ fn main() {
     let video_subsystem = sdl_context.video().unwrap();
 
     let window = video_subsystem
-        .window("stupid horse", 800, 600)
+        .window("stupid horse", DIMS.0, DIMS.1)
         .vulkan()
         .build()
         .unwrap();
@@ -128,7 +137,7 @@ fn main() {
         .capabilities(game.phys_gpu)
         .expect("failed to get surface capabilities");
 
-    let dims = caps.current_extent.unwrap_or([800, 600]);
+    let dims = caps.current_extent.unwrap_or([DIMS.0, DIMS.1]);
     let alpha = caps.supported_composite_alpha.iter().next().unwrap();
     let format = caps.supported_formats[0];
 
@@ -207,9 +216,13 @@ fn main() {
 
     let vert_buf = {
         let verts = [
-            Vertex { position: [-0.5, -0.25] },
-            Vertex { position: [0.0, 0.5] },
-            Vertex { position: [0.25, -0.1] }
+            Vertex::new( 0.0,  0.0),
+            Vertex::new(-0.5, -0.5),
+            Vertex::new( 0.5, -0.5),
+
+            Vertex::new( 0.0, 0.0),
+            Vertex::new(-0.5, 0.5),
+            Vertex::new( 0.5, 0.5)
         ];
 
         CpuAccessibleBuffer::from_iter(game.gpu.clone(), BufferUsage::all(), false, verts.iter().cloned()).unwrap()
@@ -222,26 +235,38 @@ fn main() {
     let descriptor_set = Arc::new(pool.next().add_buffer(uniform_buf).unwrap().build().unwrap());
     */
 
-    let layout = pipeline.descriptor_set_layout(0).unwrap();
-    let uniform_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0 as f32).unwrap();
-    let descriptor_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
-        .add_buffer(uniform_buf.clone()).unwrap()
-        .build().unwrap());
+    let (time_buf, space_buf, desc) = {
+        let layout = pipeline.descriptor_set_layout(0).unwrap();
+
+        let time_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0.0f32).unwrap();
+
+        let space_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, (0.0f32, 0.0f32)).unwrap();
+
+        let desc = PersistentDescriptorSet::start(layout.clone())
+            .add_buffer(time_buf.clone()).unwrap()
+            .add_buffer(space_buf.clone()).unwrap()
+            .build().unwrap();
+
+        (time_buf, space_buf, Arc::new(desc))
+    };
 
     'running: loop {
+        prev_frame_end.as_mut().unwrap().cleanup_finished();
+
         for event in event_pump.poll_iter() {
             match event {
                 Event::Quit { .. } => break 'running,
                 Event::MouseMotion { .. } => (),
+                Event::MouseButtonDown { x, y, .. } => {
+                    let ecks = (2*x - dims[0] as i32) as f32 / dims[0] as f32;
+                    let why  = (2*y - dims[1] as i32) as f32 / dims[1] as f32;
+                    *space_buf.write().unwrap() = (ecks, why);
+                },
                 _ => println!("{:?}", event),
             }
         }
 
-        prev_frame_end.as_mut().unwrap().cleanup_finished();
-
-        {
-            *uniform_buf.write().unwrap() += 0.1;
-        }
+        *time_buf.write().unwrap() += 0.1;
 
         let (image_num, suboptimal, acquire_future) =
             swapchain::acquire_next_image(swapchain.clone(), None).unwrap();
@@ -252,8 +277,8 @@ fn main() {
             .unwrap()
             .begin_render_pass(fb, false, clear_values.to_vec())
             .unwrap()
-            .draw(pipeline.clone(), &dyn_state, vert_buf.clone(), descriptor_set.clone(), ())
-            .unwrap()
+            .draw(pipeline.clone(), &dyn_state, vert_buf.clone(), desc.clone(), ())
+            .expect("draw call failed")
             .end_render_pass()
             .unwrap()
             .build()

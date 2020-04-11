@@ -1,0 +1,13 @@
+[package]
+name = "stupid-horse"
+version = "0.1.0"
+authors = ["The0x539"]
+edition = "2018"
+
+[dependencies]
+vulkano = "0.18"
+vulkano-shaders = "0.18"
+image = "0.21"
+shaderc-sys = { version = "0.6.0", features =  ["build-from-source"]}
+sdl2 = "0.33.0"
+

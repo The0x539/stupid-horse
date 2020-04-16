@@ -25,7 +25,7 @@ use vulkano::{
 
 use image::{ImageBuffer, Rgba};
 
-use sdl2::{event::Event, keyboard::Keycode, pixels::Color, video::Window};
+use sdl2::{Sdl, event::Event, keyboard::Keycode, pixels::Color, video::Window};
 
 mod vs {
     vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" }
@@ -35,6 +35,8 @@ mod fs {
 }
 
 mod vulkano_sdl2;
+
+static DIMS: (u32, u32) = (600, 600);
 
 #[derive(Default, Copy, Clone)]
 struct Vertex {
@@ -49,17 +51,32 @@ impl Vertex {
 
 vulkano::impl_vertex!(Vertex, position);
 
-struct Game<'a> {
+struct Game {
+    pub sdl: Sdl,
+    pub vulkan: Arc<Instance>,
     pub gpu: Arc<Device>,
-    pub phys_gpu: PhysicalDevice<'a>,
+    phys_gpu_index: usize,
     pub queue: Arc<Queue>,
     pub surface: Arc<Surface<()>>,
     pub window: Window,
 }
 
-impl<'a> Game<'a> {
-    pub fn new(inst: &'a Arc<Instance>, window: Window) -> Self {
-        let phys_gpu = PhysicalDevice::enumerate(inst)
+impl Game {
+    pub fn new() -> Self {
+        let sdl = sdl2::init().unwrap();
+        let video_subsystem = sdl.video().unwrap();
+
+        let window = video_subsystem
+            .window("stupid horse", DIMS.0, DIMS.1)
+            .vulkan()
+            .build()
+            .unwrap();
+
+        let exts = vulkano_sdl2::required_extensions(&window).unwrap();
+
+        let inst = Instance::new(None, &exts, None).expect("failed to create instance");
+
+        let phys_gpu = PhysicalDevice::enumerate(&inst)
             .next()
             .expect("no device available");
 
@@ -94,40 +111,32 @@ impl<'a> Game<'a> {
             Arc::new(Surface::from_raw_surface(inst.clone(), raw_surface, ()))
         };
 
+        let gpu_idx = phys_gpu.index();
+
         Self {
+            sdl: sdl,
+            vulkan: inst,
             gpu: gpu,
-            phys_gpu: phys_gpu,
+            phys_gpu_index: gpu_idx,
             queue: queue,
             surface: surface,
             window: window,
         }
     }
-}
 
-static DIMS: (u32, u32) = (600, 600);
+    pub fn phys_gpu(&self) -> PhysicalDevice {
+        PhysicalDevice::from_index(&self.vulkan, self.phys_gpu_index).unwrap()
+    }
+}
 
 fn main() {
     //std::env::set_var("SDL_VIDEODRIVER", "wayland");
 
-    let sdl_context = sdl2::init().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
-
-    let window = video_subsystem
-        .window("stupid horse", DIMS.0, DIMS.1)
-        .vulkan()
-        .build()
-        .unwrap();
-
-    let exts = vulkano_sdl2::required_extensions(&window).unwrap();
-    println!("{:?}", exts);
-
-    let inst = Instance::new(None, &exts, None).expect("failed to create instance");
-
-    let game = Game::new(&inst, window);
+    let game = Game::new();
 
     let caps = game
         .surface
-        .capabilities(game.phys_gpu)
+        .capabilities(game.phys_gpu())
         .expect("failed to get surface capabilities");
 
     let dims = caps.current_extent.unwrap_or([DIMS.0, DIMS.1]);
@@ -181,7 +190,7 @@ fn main() {
 
     let mut prev_frame_end = Some(Box::new(sync::now(game.gpu.clone())) as Box<dyn GpuFuture>);
 
-    let mut event_pump = sdl_context.event_pump().unwrap();
+    let mut event_pump = game.sdl.event_pump().unwrap();
 
     let clear_values = [ClearValue::Float([0.0, 0.0, 1.0, 1.0])];
     let vs = vs::Shader::load(game.gpu.clone()).unwrap();

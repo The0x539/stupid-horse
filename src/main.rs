@@ -1,6 +1,7 @@
 #![allow(unused_variables, unused_macros, unused_imports, unused_mut)]
 
 use std::sync::Arc;
+use std::ffi::CString;
 
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
@@ -9,7 +10,7 @@ use vulkano::{
     format::{ClearValue, Format},
     framebuffer::{Framebuffer, FramebufferAbstract, Subpass},
     image::{Dimensions, StorageImage},
-    instance::{Instance, InstanceExtensions, PhysicalDevice},
+    instance::{Instance, RawInstanceExtensions, PhysicalDevice},
     pipeline::{viewport::Viewport, GraphicsPipeline},
     swapchain::{
         self, ColorSpace, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain,
@@ -33,8 +34,6 @@ mod vs {
 mod fs {
     vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" }
 }
-
-mod vulkano_sdl2;
 
 static DIMS: (u32, u32) = (600, 600);
 
@@ -61,6 +60,14 @@ struct Game {
     pub window: Window,
 }
 
+fn required_extensions(window: &sdl2::video::Window) -> RawInstanceExtensions {
+    let ext_names: Vec<&str> = window.vulkan_instance_extensions().unwrap();
+
+    let ext_strs = ext_names.into_iter().map(|s| CString::new(s.as_bytes()).unwrap());
+
+    RawInstanceExtensions::new(ext_strs)
+}
+
 impl Game {
     pub fn new() -> Self {
         let sdl = sdl2::init().unwrap();
@@ -72,9 +79,9 @@ impl Game {
             .build()
             .unwrap();
 
-        let exts = vulkano_sdl2::required_extensions(&window).unwrap();
+        let exts = required_extensions(&window);
 
-        let inst = Instance::new(None, &exts, None).expect("failed to create instance");
+        let inst = Instance::new(None, exts, None).expect("failed to create instance");
 
         let phys_gpu = PhysicalDevice::enumerate(&inst)
             .next()
@@ -130,8 +137,6 @@ impl Game {
 }
 
 fn main() {
-    //std::env::set_var("SDL_VIDEODRIVER", "wayland");
-
     let game = Game::new();
 
     let caps = game

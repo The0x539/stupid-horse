@@ -54,10 +54,11 @@ struct Game<'a> {
     pub phys_gpu: PhysicalDevice<'a>,
     pub queue: Arc<Queue>,
     pub surface: Arc<Surface<()>>,
+    pub window: Window,
 }
 
 impl<'a> Game<'a> {
-    pub fn new(inst: &'a Arc<Instance>, window: &Window) -> Self {
+    pub fn new(inst: &'a Arc<Instance>, window: Window) -> Self {
         let phys_gpu = PhysicalDevice::enumerate(inst)
             .next()
             .expect("no device available");
@@ -83,23 +84,14 @@ impl<'a> Game<'a> {
         };
         let queue = queues.next().unwrap();
 
-        let surface = {
-            let raw = window
-                .vulkan_create_surface(inst.internal_object())
-                .unwrap();
+        let surface = unsafe {
+            let raw_instance = inst.internal_object();
+            let raw_surface = window.vulkan_create_surface(raw_instance).unwrap();
 
             // One would think this should use window instead of ()
             // but that... breaks thread safety? somehow? why?
             // why does that even matter?
-            //
-            // passing the window obj by value breaks things:
-            // the window gets destructed, when this surface obj should own it
-            // but if this surface owns it, then the framebuffers, which reference the swapchain,
-            // which reference this surface, which references the window,
-            // can't be used in begin_draw_call()
-            // and if you can't do that you can't do anything
-            let obj = unsafe { Surface::from_raw_surface(inst.clone(), raw, ()) };
-            Arc::new(obj)
+            Arc::new(Surface::from_raw_surface(inst.clone(), raw_surface, ()))
         };
 
         Self {
@@ -107,6 +99,7 @@ impl<'a> Game<'a> {
             phys_gpu: phys_gpu,
             queue: queue,
             surface: surface,
+            window: window,
         }
     }
 }
@@ -130,7 +123,7 @@ fn main() {
 
     let inst = Instance::new(None, &exts, None).expect("failed to create instance");
 
-    let game = Game::new(&inst, &window);
+    let game = Game::new(&inst, window);
 
     let caps = game
         .surface

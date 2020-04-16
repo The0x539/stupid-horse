@@ -9,7 +9,7 @@ use vulkano::{
     device::{Device, DeviceExtensions, Features, Queue},
     format::{ClearValue, Format},
     framebuffer::{Framebuffer, FramebufferAbstract, Subpass},
-    image::{Dimensions, StorageImage},
+    image::{Dimensions, StorageImage, SwapchainImage},
     instance::{Instance, RawInstanceExtensions, PhysicalDevice},
     pipeline::{viewport::Viewport, GraphicsPipeline},
     swapchain::{
@@ -50,14 +50,33 @@ impl Vertex {
 
 vulkano::impl_vertex!(Vertex, position);
 
+trait IntoPair<T> {
+    fn cast(&self) -> [T; 2];
+}
+
+impl IntoPair<f32> for [u32; 2] {
+    fn cast(&self) -> [f32; 2] {
+        [self[0] as f32, self[1] as f32]
+    }
+}
+
+impl IntoPair<u32> for (u32, u32) {
+    fn cast(&self) -> [u32; 2] {
+        [self.0, self.1]
+    }
+}
+
+
 struct Game {
     pub sdl: Sdl,
     pub vulkan: Arc<Instance>,
     pub gpu: Arc<Device>,
-    phys_gpu_index: usize,
     pub queue: Arc<Queue>,
     pub surface: Arc<Surface<()>>,
     pub window: Window,
+
+    pub swapchain: Arc<Swapchain<()>>,
+    pub images: Vec<Arc<SwapchainImage<()>>>
 }
 
 fn required_extensions(window: &sdl2::video::Window) -> RawInstanceExtensions {
@@ -118,52 +137,41 @@ impl Game {
             Arc::new(Surface::from_raw_surface(inst.clone(), raw_surface, ()))
         };
 
-        let gpu_idx = phys_gpu.index();
+        let caps = surface.capabilities(phys_gpu).unwrap();
+
+        let (swapchain, images) = Swapchain::new(
+            gpu.clone(),
+            surface.clone(),
+            caps.min_image_count,
+            caps.supported_formats[0].0,
+            caps.current_extent.unwrap_or(DIMS.cast()),
+            1,
+            caps.supported_usage_flags,
+            &queue,
+            SurfaceTransform::Identity,
+            caps.supported_composite_alpha.iter().next().unwrap(),
+            PresentMode::Fifo,
+            FullscreenExclusive::Default,
+            true,
+            caps.supported_formats[0].1,
+        ).expect("failed to create swapchain");
 
         Self {
             sdl: sdl,
             vulkan: inst,
             gpu: gpu,
-            phys_gpu_index: gpu_idx,
             queue: queue,
             surface: surface,
             window: window,
-        }
-    }
 
-    pub fn phys_gpu(&self) -> PhysicalDevice {
-        PhysicalDevice::from_index(&self.vulkan, self.phys_gpu_index).unwrap()
+            swapchain: swapchain,
+            images: images,
+        }
     }
 }
 
 fn main() {
     let game = Game::new();
-
-    let caps = game
-        .surface
-        .capabilities(game.phys_gpu())
-        .expect("failed to get surface capabilities");
-
-    let dims = caps.current_extent.unwrap_or([DIMS.0, DIMS.1]);
-    let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-    let format = caps.supported_formats[0];
-
-    let (swapchain, images) = Swapchain::new(
-        game.gpu.clone(),
-        game.surface.clone(),
-        caps.min_image_count,
-        format.0,
-        dims,
-        1,
-        caps.supported_usage_flags,
-        &game.queue,
-        SurfaceTransform::Identity,
-        alpha,
-        PresentMode::Fifo,
-        FullscreenExclusive::Default,
-        true,
-        format.1,
-    ).expect("failed to create swapchain");
 
     let render_pass = Arc::new(
         vulkano::single_pass_renderpass!(
@@ -172,7 +180,7 @@ fn main() {
                 color: {
                     load: Clear,
                     store: Store,
-                    format: swapchain.format(),
+                    format: game.swapchain.format(),
                     samples: 1,
                 }
             },
@@ -180,7 +188,7 @@ fn main() {
         ).unwrap()
     );
 
-    let framebuffers = images
+    let framebuffers = game.images
         .iter()
         .map(|image| {
             Arc::new(
@@ -215,7 +223,7 @@ fn main() {
     let mut dyn_state = DynamicState {
         viewports: Some(vec![Viewport {
             origin: [0.0, 0.0], 
-            dimensions: [dims[0] as f32, dims[1] as f32],
+            dimensions: game.swapchain.dimensions().cast(),
             depth_range: 0.0..1.0,
         }]),
         ..Default::default()
@@ -265,8 +273,10 @@ fn main() {
                 Event::Quit { .. } => break 'running,
                 Event::MouseMotion { .. } => (),
                 Event::MouseButtonDown { x, y, .. } => {
-                    let ecks = (2*x - dims[0] as i32) as f32 / dims[0] as f32;
-                    let why  = (2*y - dims[1] as i32) as f32 / dims[1] as f32;
+                    let dims = game.swapchain.dimensions();
+                    let (w, h) = (dims[0], dims[1]);
+                    let ecks = (2*x - w as i32) as f32 / w as f32;
+                    let why  = (2*y - h as i32) as f32 / h as f32;
                     *space_buf.write().unwrap() = (ecks, why);
                 },
                 _ => println!("{:?}", event),
@@ -276,7 +286,11 @@ fn main() {
         *time_buf.write().unwrap() += 0.1;
 
         let (image_num, suboptimal, acquire_future) =
-            swapchain::acquire_next_image(swapchain.clone(), None).unwrap();
+            swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();
+
+        if suboptimal {
+            panic!("suboptimal");
+        }
 
         let fb = framebuffers[image_num].clone();
 
@@ -294,7 +308,7 @@ fn main() {
         let future = prev_frame_end.take().unwrap()
             .join(acquire_future)
             .then_execute(game.queue.clone(), command_buffer).unwrap()
-            .then_swapchain_present(game.queue.clone(), swapchain.clone(), image_num)
+            .then_swapchain_present(game.queue.clone(), game.swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 
         match future {

@@ -8,7 +8,7 @@ use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, CommandBuffer, DynamicState},
     device::{Device, DeviceExtensions, Features, Queue},
     format::{ClearValue, Format},
-    framebuffer::{Framebuffer, FramebufferAbstract, Subpass},
+    framebuffer::{Framebuffer, FramebufferAbstract, Subpass, RenderPass, RenderPassAbstract},
     image::{Dimensions, StorageImage, SwapchainImage},
     instance::{Instance, RawInstanceExtensions, PhysicalDevice},
     pipeline::{viewport::Viewport, GraphicsPipeline},
@@ -66,7 +66,6 @@ impl IntoPair<u32> for (u32, u32) {
     }
 }
 
-
 struct Game {
     pub sdl: Sdl,
     pub vulkan: Arc<Instance>,
@@ -76,7 +75,8 @@ struct Game {
     pub window: Window,
 
     pub swapchain: Arc<Swapchain<()>>,
-    pub images: Vec<Arc<SwapchainImage<()>>>
+    pub images: Vec<Arc<SwapchainImage<()>>>,
+    pub render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
 }
 
 fn required_extensions(window: &sdl2::video::Window) -> RawInstanceExtensions {
@@ -156,6 +156,21 @@ impl Game {
             caps.supported_formats[0].1,
         ).expect("failed to create swapchain");
 
+        let render_pass = Arc::new(
+            vulkano::single_pass_renderpass!(
+                gpu.clone(),
+                attachments: {
+                    color: {
+                        load: Clear,
+                        store: Store,
+                        format: swapchain.format(),
+                        samples: 1,
+                    }
+                },
+                pass: {color: [color], depth_stencil: {}}
+            ).unwrap()
+        );
+
         Self {
             sdl: sdl,
             vulkan: inst,
@@ -166,6 +181,7 @@ impl Game {
 
             swapchain: swapchain,
             images: images,
+            render_pass: render_pass,
         }
     }
 }
@@ -173,26 +189,11 @@ impl Game {
 fn main() {
     let game = Game::new();
 
-    let render_pass = Arc::new(
-        vulkano::single_pass_renderpass!(
-            game.gpu.clone(),
-            attachments: {
-                color: {
-                    load: Clear,
-                    store: Store,
-                    format: game.swapchain.format(),
-                    samples: 1,
-                }
-            },
-            pass: {color: [color], depth_stencil: {}}
-        ).unwrap()
-    );
-
     let framebuffers = game.images
         .iter()
         .map(|image| {
             Arc::new(
-                Framebuffer::start(render_pass.clone())
+                Framebuffer::start(game.render_pass.clone())
                     .add(image.clone())
                     .unwrap()
                     .build()
@@ -215,7 +216,7 @@ fn main() {
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .render_pass(Subpass::from(game.render_pass.clone(), 0).unwrap())
             .build(game.gpu.clone())
             .unwrap(),
     );

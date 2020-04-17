@@ -8,7 +8,7 @@ use vulkano::{
     command_buffer::{AutoCommandBufferBuilder, CommandBuffer, DynamicState},
     device::{Device, DeviceExtensions, Features, Queue},
     format::{ClearValue, Format},
-    framebuffer::{Framebuffer, FramebufferAbstract, Subpass, RenderPass, RenderPassAbstract},
+    framebuffer::{self as fb, Framebuffer, FramebufferAbstract, Subpass, RenderPass, RenderPassAbstract, RenderPassDesc, RenderPassDescClearValues},
     image::{Dimensions, StorageImage, SwapchainImage},
     instance::{Instance, RawInstanceExtensions, PhysicalDevice},
     pipeline::{viewport::Viewport, GraphicsPipeline},
@@ -34,6 +34,9 @@ mod vs {
 mod fs {
     vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" }
 }
+
+mod passdesc;
+use passdesc::CustomRenderPassDesc as Desc;
 
 static DIMS: (u32, u32) = (600, 600);
 
@@ -156,20 +159,10 @@ impl Game {
             caps.supported_formats[0].1,
         ).expect("failed to create swapchain");
 
-        let render_pass = Arc::new(
-            vulkano::single_pass_renderpass!(
-                gpu.clone(),
-                attachments: {
-                    color: {
-                        load: Clear,
-                        store: Store,
-                        format: swapchain.format(),
-                        samples: 1,
-                    }
-                },
-                pass: {color: [color], depth_stencil: {}}
-            ).unwrap()
-        );
+        let render_pass = {
+            let pass = Desc{color: (swapchain.format(), 1)}.build_render_pass(gpu.clone()).unwrap();
+            Arc::new(pass)
+        };
 
         Self {
             sdl: sdl,

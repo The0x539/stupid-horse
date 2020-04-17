@@ -79,7 +79,7 @@ struct Game {
 
     pub swapchain: Arc<Swapchain<()>>,
     pub images: Vec<Arc<SwapchainImage<()>>>,
-    pub render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    pub render_pass: Arc<RenderPass<Desc>>,
 }
 
 fn required_extensions(window: &sdl2::video::Window) -> RawInstanceExtensions {

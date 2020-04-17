@@ -1,11 +1,16 @@
-use vulkano::format::ClearValue;
-use vulkano::format::Format;
-use vulkano::framebuffer::RenderPassDesc;
-use vulkano::framebuffer::RenderPassDescClearValues;
-use vulkano::framebuffer::AttachmentDescription;
-use vulkano::framebuffer::PassDescription;
-use vulkano::framebuffer::PassDependencyDescription;
-use vulkano::image::ImageLayout;
+use vulkano::{
+    format::{ClearValue, Format},
+    framebuffer::{
+        RenderPassDesc,
+        RenderPassDescClearValues,
+        AttachmentDescription,
+        PassDescription,
+        PassDependencyDescription,
+        LoadOp,
+        StoreOp,
+    },
+    image::ImageLayout,
+};
 
 pub struct Desc {
     pub color: (Format, u32),
@@ -19,13 +24,13 @@ unsafe impl RenderPassDesc for Desc {
     fn attachment_desc(&self, id: usize) -> Option<AttachmentDescription> {
         match id {
             0 => {
-                Some(vulkano::framebuffer::AttachmentDescription {
+                Some(AttachmentDescription {
                     format: self.color.0,
                     samples: self.color.1,
-                    load: vulkano::framebuffer::LoadOp::Clear,
-                    store: vulkano::framebuffer::StoreOp::Store,
-                    stencil_load: vulkano::framebuffer::LoadOp::Clear,
-                    stencil_store: vulkano::framebuffer::StoreOp::Store,
+                    load: LoadOp::Clear,
+                    store: StoreOp::Store,
+                    stencil_load: LoadOp::Clear,
+                    stencil_store: StoreOp::Store,
                     initial_layout: ImageLayout::ColorAttachmentOptimal,
                     final_layout: ImageLayout::ColorAttachmentOptimal,
                 })

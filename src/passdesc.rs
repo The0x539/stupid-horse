@@ -7,11 +7,11 @@ use vulkano::framebuffer::PassDescription;
 use vulkano::framebuffer::PassDependencyDescription;
 use vulkano::image::ImageLayout;
 
-pub struct CustomRenderPassDesc {
+pub struct Desc {
     pub color: (Format, u32),
 }
 
-unsafe impl RenderPassDesc for CustomRenderPassDesc {
+unsafe impl RenderPassDesc for Desc {
     #[inline]
     fn num_attachments(&self) -> usize { 1 }
 
@@ -66,7 +66,7 @@ unsafe impl RenderPassDesc for CustomRenderPassDesc {
     }
 }
 
-unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for CustomRenderPassDesc {
+unsafe impl RenderPassDescClearValues<Vec<ClearValue>> for Desc {
     fn convert_clear_values(&self, values: Vec<ClearValue>) -> Box<dyn Iterator<Item = ClearValue>> {
         // FIXME: safety checks
         Box::new(values.into_iter())

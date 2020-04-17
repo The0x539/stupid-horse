@@ -7,8 +7,8 @@ use vulkano::{
     descriptor::{descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract},
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
-    framebuffer::{Framebuffer, Subpass, RenderPass, RenderPassDesc},
-    image::SwapchainImage,
+    framebuffer::{self as vk_fb, Subpass, RenderPassDesc},
+    image as vk_img,
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
     pipeline::{viewport::Viewport, GraphicsPipeline},
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
@@ -18,11 +18,13 @@ use vulkano::{
 
 use sdl2::{Sdl, event::Event, video::Window};
 
+use fragile::Fragile;
+
 mod vs { vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" } }
 mod fs { vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" } }
 
 mod passdesc;
-use passdesc::CustomRenderPassDesc as Desc;
+use passdesc::Desc;
 
 static DIMS: [u32; 2] = [600, 600];
 
@@ -39,17 +41,21 @@ impl Vertex {
 
 vulkano::impl_vertex!(Vertex, position);
 
+type RenderPass = vk_fb::RenderPass<Desc>;
+type SwapchainImage = vk_img::SwapchainImage<Fragile<Window>>;
+type FramebufferImage = ((), Arc<SwapchainImage>);
+type Framebuffer = vk_fb::Framebuffer<Arc<RenderPass>, FramebufferImage>;
+
 struct Game {
     sdl: Sdl,
     gpu: Arc<Device>,
     queue: Arc<Queue>,
-    _window: Window, // should be owned by the swapchain, but see the below comment
 
-    swapchain: Arc<Swapchain<()>>,
-    framebuffers: Vec<Arc<Framebuffer<Arc<RenderPass<Desc>>, ((), Arc<SwapchainImage<()>>)>>>,
+    swapchain: Arc<Swapchain<Fragile<Window>>>,
+    framebuffers: Vec<Arc<Framebuffer>>,
 }
 
-fn required_extensions(window: &sdl2::video::Window) -> RawInstanceExtensions {
+fn required_extensions(window: &Window) -> RawInstanceExtensions {
     let ext_names: Vec<&str> = window.vulkan_instance_extensions().unwrap();
 
     let ext_strs = ext_names.into_iter().map(|s| CString::new(s.as_bytes()).unwrap());
@@ -100,11 +106,7 @@ impl Game {
         let surface = unsafe {
             let raw_instance = inst.internal_object();
             let raw_surface = window.vulkan_create_surface(raw_instance).unwrap();
-
-            // One would think this should use window instead of ()
-            // but that... breaks thread safety? somehow? why?
-            // why does that even matter?
-            Arc::new(Surface::from_raw_surface(inst.clone(), raw_surface, ()))
+            Arc::new(Surface::from_raw_surface(inst.clone(), raw_surface, Fragile::new(window)))
         };
 
         let caps = surface.capabilities(phys_gpu).unwrap();
@@ -135,7 +137,7 @@ impl Game {
             .iter()
             .map(|image| {
                 Arc::new(
-                    Framebuffer::start(render_pass.clone())
+                    vk_fb::Framebuffer::start(render_pass.clone())
                         .add(image.clone())
                         .unwrap()
                         .build()
@@ -148,7 +150,6 @@ impl Game {
             sdl: sdl,
             gpu: gpu,
             queue: queue,
-            _window: window,
             swapchain: swapchain,
             framebuffers: framebuffers,
         }

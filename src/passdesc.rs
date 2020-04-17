@@ -6,8 +6,6 @@ use vulkano::framebuffer::AttachmentDescription;
 use vulkano::framebuffer::PassDescription;
 use vulkano::framebuffer::PassDependencyDescription;
 use vulkano::image::ImageLayout;
-use vulkano::sync::AccessFlagBits;
-use vulkano::sync::PipelineStages;
 
 pub struct CustomRenderPassDesc {
     pub color: (Format, u32),
@@ -43,7 +41,7 @@ unsafe impl RenderPassDesc for CustomRenderPassDesc {
     fn subpass_desc(&self, id: usize) -> Option<PassDescription> {
         match id {
             0 => {
-                let mut desc = PassDescription {
+                let desc = PassDescription {
                     color_attachments: vec![(0, ImageLayout::ColorAttachmentOptimal)],
                     depth_stencil: None,
                     input_attachments: vec![],
@@ -63,7 +61,7 @@ unsafe impl RenderPassDesc for CustomRenderPassDesc {
     fn num_dependencies(&self) -> usize { 0 }
 
     #[inline]
-    fn dependency_desc(&self, id: usize) -> Option<PassDependencyDescription> {
+    fn dependency_desc(&self, _id: usize) -> Option<PassDependencyDescription> {
         None
     }
 }

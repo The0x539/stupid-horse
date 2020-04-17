@@ -1,44 +1,30 @@
-#![allow(unused_variables, unused_macros, unused_imports, unused_mut)]
-
 use std::sync::Arc;
 use std::ffi::CString;
 
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
-    command_buffer::{AutoCommandBufferBuilder, CommandBuffer, DynamicState},
-    device::{Device, DeviceExtensions, Features, Queue},
-    format::{ClearValue, Format},
-    framebuffer::{self as fb, Framebuffer, FramebufferAbstract, Subpass, RenderPass, RenderPassAbstract, RenderPassDesc, RenderPassDescClearValues},
-    image::{Dimensions, StorageImage, SwapchainImage},
-    instance::{Instance, RawInstanceExtensions, PhysicalDevice},
+    command_buffer::{AutoCommandBufferBuilder, DynamicState},
+    descriptor::{descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract},
+    device::{Device, DeviceExtensions, Queue},
+    format::ClearValue,
+    framebuffer::{Framebuffer, Subpass, RenderPass, RenderPassDesc},
+    image::SwapchainImage,
+    instance::{Instance, PhysicalDevice, RawInstanceExtensions},
     pipeline::{viewport::Viewport, GraphicsPipeline},
-    swapchain::{
-        self, ColorSpace, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain,
-    },
-    sync,
-    sync::GpuFuture,
+    swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
+    sync::{self, GpuFuture},
     VulkanObject,
-    descriptor::{
-        descriptor_set::PersistentDescriptorSet,
-        pipeline_layout::PipelineLayoutAbstract,
-    }
 };
 
-use image::{ImageBuffer, Rgba};
+use sdl2::{Sdl, event::Event, video::Window};
 
-use sdl2::{Sdl, event::Event, keyboard::Keycode, pixels::Color, video::Window};
-
-mod vs {
-    vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" }
-}
-mod fs {
-    vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" }
-}
+mod vs { vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" } }
+mod fs { vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" } }
 
 mod passdesc;
 use passdesc::CustomRenderPassDesc as Desc;
 
-static DIMS: (u32, u32) = (600, 600);
+static DIMS: [u32; 2] = [600, 600];
 
 #[derive(Default, Copy, Clone)]
 struct Vertex {
@@ -53,32 +39,14 @@ impl Vertex {
 
 vulkano::impl_vertex!(Vertex, position);
 
-trait IntoPair<T> {
-    fn cast(&self) -> [T; 2];
-}
-
-impl IntoPair<f32> for [u32; 2] {
-    fn cast(&self) -> [f32; 2] {
-        [self[0] as f32, self[1] as f32]
-    }
-}
-
-impl IntoPair<u32> for (u32, u32) {
-    fn cast(&self) -> [u32; 2] {
-        [self.0, self.1]
-    }
-}
-
 struct Game {
-    pub sdl: Sdl,
-    pub vulkan: Arc<Instance>,
-    pub gpu: Arc<Device>,
-    pub queue: Arc<Queue>,
-    pub surface: Arc<Surface<()>>,
-    pub window: Window,
+    sdl: Sdl,
+    gpu: Arc<Device>,
+    queue: Arc<Queue>,
+    _window: Window, // should be owned by the swapchain, but see the below comment
 
-    pub swapchain: Arc<Swapchain<()>>,
-    pub framebuffers: Vec<Arc<Framebuffer<Arc<RenderPass<Desc>>, ((), Arc<SwapchainImage<()>>)>>>,
+    swapchain: Arc<Swapchain<()>>,
+    framebuffers: Vec<Arc<Framebuffer<Arc<RenderPass<Desc>>, ((), Arc<SwapchainImage<()>>)>>>,
 }
 
 fn required_extensions(window: &sdl2::video::Window) -> RawInstanceExtensions {
@@ -95,7 +63,7 @@ impl Game {
         let video_subsystem = sdl.video().unwrap();
 
         let window = video_subsystem
-            .window("stupid horse", DIMS.0, DIMS.1)
+            .window("stupid horse", DIMS[0], DIMS[1])
             .vulkan()
             .build()
             .unwrap();
@@ -146,7 +114,7 @@ impl Game {
             surface.clone(),
             caps.min_image_count,
             caps.supported_formats[0].0,
-            caps.current_extent.unwrap_or(DIMS.cast()),
+            caps.current_extent.unwrap_or(DIMS),
             1,
             caps.supported_usage_flags,
             &queue,
@@ -178,12 +146,9 @@ impl Game {
 
         Self {
             sdl: sdl,
-            vulkan: inst,
             gpu: gpu,
             queue: queue,
-            surface: surface,
-            window: window,
-
+            _window: window,
             swapchain: swapchain,
             framebuffers: framebuffers,
         }
@@ -212,10 +177,10 @@ fn main() {
             .unwrap(),
     );
 
-    let mut dyn_state = DynamicState {
+    let dyn_state = DynamicState {
         viewports: Some(vec![Viewport {
             origin: [0.0, 0.0], 
-            dimensions: game.swapchain.dimensions().cast(),
+            dimensions: [game.swapchain.dimensions()[0] as f32, game.swapchain.dimensions()[1] as f32],
             depth_range: 0.0..1.0,
         }]),
         ..Default::default()

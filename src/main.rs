@@ -78,8 +78,7 @@ struct Game {
     pub window: Window,
 
     pub swapchain: Arc<Swapchain<()>>,
-    pub images: Vec<Arc<SwapchainImage<()>>>,
-    pub render_pass: Arc<RenderPass<Desc>>,
+    pub framebuffers: Vec<Arc<Framebuffer<Arc<RenderPass<Desc>>, ((), Arc<SwapchainImage<()>>)>>>,
 }
 
 fn required_extensions(window: &sdl2::video::Window) -> RawInstanceExtensions {
@@ -164,6 +163,19 @@ impl Game {
             Arc::new(pass)
         };
 
+        let framebuffers = images
+            .iter()
+            .map(|image| {
+                Arc::new(
+                    Framebuffer::start(render_pass.clone())
+                        .add(image.clone())
+                        .unwrap()
+                        .build()
+                        .unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+
         Self {
             sdl: sdl,
             vulkan: inst,
@@ -173,27 +185,13 @@ impl Game {
             window: window,
 
             swapchain: swapchain,
-            images: images,
-            render_pass: render_pass,
+            framebuffers: framebuffers,
         }
     }
 }
 
 fn main() {
     let game = Game::new();
-
-    let framebuffers = game.images
-        .iter()
-        .map(|image| {
-            Arc::new(
-                Framebuffer::start(game.render_pass.clone())
-                    .add(image.clone())
-                    .unwrap()
-                    .build()
-                    .unwrap(),
-            )
-        })
-        .collect::<Vec<_>>();
 
     let mut prev_frame_end = Some(Box::new(sync::now(game.gpu.clone())) as Box<dyn GpuFuture>);
 
@@ -209,7 +207,7 @@ fn main() {
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from(game.render_pass.clone(), 0).unwrap())
+            .render_pass(Subpass::from(game.framebuffers[0].render_pass().clone(), 0).unwrap())
             .build(game.gpu.clone())
             .unwrap(),
     );
@@ -286,7 +284,7 @@ fn main() {
             panic!("suboptimal");
         }
 
-        let fb = framebuffers[image_num].clone();
+        let fb = game.framebuffers[image_num].clone();
 
         let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(game.gpu.clone(), game.queue.family())
             .unwrap()

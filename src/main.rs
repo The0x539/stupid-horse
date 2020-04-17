@@ -50,16 +50,13 @@ struct Game {
     sdl: Sdl,
     gpu: Arc<Device>,
     queue: Arc<Queue>,
-
     swapchain: Arc<Swapchain<Fragile<Window>>>,
     framebuffers: Vec<Arc<Framebuffer>>,
 }
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
     let ext_names: Vec<&str> = window.vulkan_instance_extensions().unwrap();
-
     let ext_strs = ext_names.into_iter().map(|s| CString::new(s.as_bytes()).unwrap());
-
     RawInstanceExtensions::new(ext_strs)
 }
 
@@ -201,20 +198,10 @@ fn main() {
         CpuAccessibleBuffer::from_iter(game.gpu.clone(), BufferUsage::all(), false, verts.iter().cloned()).unwrap()
     };
 
-    /*
-    let layout = pipeline.descriptor_set_layout(0).unwrap();
-    let mut pool = PersistentDescriptorSet::start(*layout).build().unwrap();
-    let uniform_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 5.0 as f32).unwrap();
-    let descriptor_set = Arc::new(pool.next().add_buffer(uniform_buf).unwrap().build().unwrap());
-    */
-
     let (time_buf, space_buf, desc) = {
         let layout = pipeline.descriptor_set_layout(0).unwrap();
-
         let time_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0.0f32).unwrap();
-
         let space_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, (0.0f32, 0.0f32)).unwrap();
-
         let desc = PersistentDescriptorSet::start(layout.clone())
             .add_buffer(time_buf.clone()).unwrap()
             .add_buffer(space_buf.clone()).unwrap()

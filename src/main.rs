@@ -176,8 +176,6 @@ fn main() {
 
     let mut event_pump = game.sdl.event_pump().unwrap();
 
-    let clear_values = [ClearValue::Float([0.0, 0.0, 1.0, 1.0])];
-
     let dyn_state = DynamicState {
         viewports: Some(vec![Viewport {
             origin: [0.0, 0.0], 
@@ -244,7 +242,7 @@ fn main() {
 
         let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(game.gpu.clone(), game.queue.family())
             .unwrap()
-            .begin_render_pass(fb, false, clear_values.to_vec())
+            .begin_render_pass(fb, false, vec![ClearValue::Float([0.0, 0.0, 1.0, 1.0])])
             .unwrap()
             .draw(game.pipeline.clone(), &dyn_state, vert_buf.clone(), desc.clone(), ())
             .expect("draw call failed")

@@ -7,7 +7,7 @@ use vulkano::{
     descriptor::{descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract},
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
-    framebuffer::{self as vk_fb, Subpass, RenderPassDesc, FramebufferAbstract},
+    framebuffer::{self as vk_fb, Subpass, FramebufferAbstract},
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
     pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract},
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
@@ -21,9 +21,6 @@ use fragile::Fragile;
 
 mod vs { vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" } }
 mod fs { vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" } }
-
-mod passdesc;
-use passdesc::Desc;
 
 static DIMS: [u32; 2] = [600, 600];
 
@@ -122,7 +119,18 @@ impl Game {
         ).expect("failed to create swapchain");
 
         let render_pass = {
-            let pass = Desc{color: (swapchain.format(), 1)}.build_render_pass(gpu.clone()).unwrap();
+            let pass = vulkano::single_pass_renderpass!(
+                gpu.clone(),
+                attachments: {
+                    color: {
+                        load: Clear,
+                        store: Store,
+                        format: swapchain.format(),
+                        samples: 1,
+                    }
+                },
+                pass: {color: [color], depth_stencil: {}}
+            ).unwrap();
             Arc::new(pass)
         };
 

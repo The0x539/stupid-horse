@@ -9,7 +9,8 @@ use vulkano::{
     },
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
-    framebuffer::{Framebuffer, FramebufferAbstract, Subpass},
+    framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
+    image::SwapchainImage,
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
     pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract},
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
@@ -51,6 +52,7 @@ struct Game {
     framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
     pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     dyn_state: DynamicState,
+    render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
 }
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
@@ -61,13 +63,50 @@ fn required_extensions(window: &Window) -> RawInstanceExtensions {
     RawInstanceExtensions::new(ext_strs)
 }
 
+fn make_viewport(w: u32, h: u32) -> Viewport {
+    Viewport {
+        origin: [0.0, 0.0],
+        // I have no idea why the API wants floats here
+        dimensions: [w as f32, h as f32],
+        depth_range: 0.0..1.0,
+    }
+}
+
 impl Game {
+    fn make_framebuffers(
+        images: Vec<Arc<SwapchainImage<Fragile<Window>>>>,
+        render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
+        let mut fbs: Vec<Arc<dyn FramebufferAbstract + Send + Sync>> = Vec::new();
+        for image in images {
+            let fb = Framebuffer::start(render_pass.clone())
+                .add(image.clone())
+                .unwrap()
+                .build()
+                .unwrap();
+            fbs.push(Arc::new(fb));
+        }
+        fbs
+    }
+
+    pub fn rebuild_swapchain(&mut self) {
+        let surface = self.swapchain.surface();
+        let window = surface.window().get();
+        let (w, h) = window.vulkan_drawable_size();
+
+        let (new_sc, new_imgs) = self.swapchain.recreate_with_dimensions([w, h]).unwrap();
+        self.swapchain = new_sc;
+        self.framebuffers = Self::make_framebuffers(new_imgs, self.render_pass.clone());
+        self.dyn_state.viewports.replace(vec![make_viewport(w, h)]);
+    }
+
     pub fn new() -> Self {
         let sdl = sdl2::init().unwrap();
         let video_subsystem = sdl.video().unwrap();
 
         let window = video_subsystem
             .window("stupid horse", DIMS[0], DIMS[1])
+            .resizable()
             .vulkan()
             .build()
             .unwrap();
@@ -148,18 +187,7 @@ impl Game {
             Arc::new(pass)
         };
 
-        let framebuffers = {
-            let mut fbs: Vec<Arc<dyn FramebufferAbstract + Send + Sync>> = Vec::new();
-            for image in images {
-                let fb = Framebuffer::start(render_pass.clone())
-                    .add(image.clone())
-                    .unwrap()
-                    .build()
-                    .unwrap();
-                fbs.push(Arc::new(fb));
-            }
-            fbs
-        };
+        let framebuffers = Self::make_framebuffers(images, render_pass.clone());
 
         let pipeline = {
             let vs = vs::Shader::load(gpu.clone()).unwrap();
@@ -180,12 +208,7 @@ impl Game {
         let dims = swapchain.dimensions();
 
         let dyn_state = DynamicState {
-            viewports: Some(vec![Viewport {
-                origin: [0.0, 0.0],
-                // I have no idea why the API wants floats here
-                dimensions: [dims[0] as f32, dims[1] as f32],
-                depth_range: 0.0..1.0,
-            }]),
+            viewports: Some(vec![make_viewport(dims[0], dims[1])]),
             ..Default::default()
         };
 
@@ -197,12 +220,13 @@ impl Game {
             framebuffers: framebuffers,
             pipeline: pipeline,
             dyn_state: dyn_state,
+            render_pass: render_pass,
         }
     }
 }
 
 fn main() {
-    let game = Game::new();
+    let mut game = Game::new();
 
     let mut prev_frame_end = Some(Box::new(sync::now(game.gpu.clone())) as Box<dyn GpuFuture>);
 
@@ -252,7 +276,16 @@ fn main() {
         (time_buf, space_buf, Arc::new(desc))
     };
 
+    let mut rebuild_swapchain = false;
+
     'running: loop {
+        // no idea where in the event loop this should actually take place
+        // no idea whether this even counts as an event loop
+        if rebuild_swapchain {
+            game.rebuild_swapchain();
+            rebuild_swapchain = false;
+        }
+
         prev_frame_end.as_mut().unwrap().cleanup_finished();
 
         for event in event_pump.poll_iter() {
@@ -276,7 +309,7 @@ fn main() {
             swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();
 
         if suboptimal {
-            panic!("suboptimal");
+            rebuild_swapchain = true;
         }
 
         let fb = game.framebuffers[image_num].clone();

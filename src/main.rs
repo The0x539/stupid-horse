@@ -1,13 +1,15 @@
-use std::sync::Arc;
 use std::ffi::CString;
+use std::sync::Arc;
 
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, DynamicState},
-    descriptor::{descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract},
+    descriptor::{
+        descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract,
+    },
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
-    framebuffer::{self as vk_fb, Subpass, FramebufferAbstract},
+    framebuffer::{Framebuffer, FramebufferAbstract, Subpass},
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
     pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract},
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
@@ -15,18 +17,22 @@ use vulkano::{
     VulkanObject,
 };
 
-use sdl2::{Sdl, event::Event, video::Window};
+use sdl2::{event::Event, video::Window, Sdl};
 
 use fragile::Fragile;
 
-mod vs { vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" } }
-mod fs { vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" } }
+mod vs {
+    vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" }
+}
+mod fs {
+    vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" }
+}
 
 static DIMS: [u32; 2] = [600, 600];
 
 #[derive(Default, Copy, Clone)]
 struct Vertex {
-    position: (f32, f32)
+    position: (f32, f32),
 }
 
 impl Vertex {
@@ -49,7 +55,9 @@ struct Game {
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
     let ext_names: Vec<&str> = window.vulkan_instance_extensions().unwrap();
-    let ext_strs = ext_names.into_iter().map(|s| CString::new(s.as_bytes()).unwrap());
+    let ext_strs = ext_names
+        .into_iter()
+        .map(|s| CString::new(s.as_bytes()).unwrap());
     RawInstanceExtensions::new(ext_strs)
 }
 
@@ -96,7 +104,11 @@ impl Game {
         let surface = unsafe {
             let raw_instance = inst.internal_object();
             let raw_surface = window.vulkan_create_surface(raw_instance).unwrap();
-            Arc::new(Surface::from_raw_surface(inst.clone(), raw_surface, Fragile::new(window)))
+            Arc::new(Surface::from_raw_surface(
+                inst.clone(),
+                raw_surface,
+                Fragile::new(window),
+            ))
         };
 
         let caps = surface.capabilities(phys_gpu).unwrap();
@@ -116,7 +128,8 @@ impl Game {
             FullscreenExclusive::Default,
             true,
             caps.supported_formats[0].1,
-        ).expect("failed to create swapchain");
+        )
+        .expect("failed to create swapchain");
 
         let render_pass = {
             let pass = vulkano::single_pass_renderpass!(
@@ -130,14 +143,15 @@ impl Game {
                     }
                 },
                 pass: {color: [color], depth_stencil: {}}
-            ).unwrap();
+            )
+            .unwrap();
             Arc::new(pass)
         };
 
         let framebuffers = {
             let mut fbs: Vec<Arc<dyn FramebufferAbstract + Send + Sync>> = Vec::new();
             for image in images {
-                let fb = vk_fb::Framebuffer::start(render_pass.clone())
+                let fb = Framebuffer::start(render_pass.clone())
                     .add(image.clone())
                     .unwrap()
                     .build()
@@ -195,6 +209,7 @@ fn main() {
     let mut event_pump = game.sdl.event_pump().unwrap();
 
     let vert_buf = {
+        #[rustfmt::skip]
         let verts = [
             Vertex::new( 0.0,  0.0),
             Vertex::new(-0.5, -0.5),
@@ -202,20 +217,37 @@ fn main() {
 
             Vertex::new( 0.0, 0.0),
             Vertex::new(-0.5, 0.5),
-            Vertex::new( 0.5, 0.5)
+            Vertex::new( 0.5, 0.5),
         ];
 
-        CpuAccessibleBuffer::from_iter(game.gpu.clone(), BufferUsage::all(), false, verts.iter().cloned()).unwrap()
+        CpuAccessibleBuffer::from_iter(
+            game.gpu.clone(),
+            BufferUsage::all(),
+            false,
+            verts.iter().cloned(),
+        )
+        .unwrap()
     };
 
     let (time_buf, space_buf, desc) = {
         let layout = game.pipeline.descriptor_set_layout(0).unwrap();
-        let time_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0.0f32).unwrap();
-        let space_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, (0.0f32, 0.0f32)).unwrap();
+        let time_buf =
+            CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0.0f32)
+                .unwrap();
+        let space_buf = CpuAccessibleBuffer::from_data(
+            game.gpu.clone(),
+            BufferUsage::all(),
+            false,
+            (0.0f32, 0.0f32),
+        )
+        .unwrap();
         let desc = PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(time_buf.clone()).unwrap()
-            .add_buffer(space_buf.clone()).unwrap()
-            .build().unwrap();
+            .add_buffer(time_buf.clone())
+            .unwrap()
+            .add_buffer(space_buf.clone())
+            .unwrap()
+            .build()
+            .unwrap();
 
         (time_buf, space_buf, Arc::new(desc))
     };
@@ -230,10 +262,10 @@ fn main() {
                 Event::MouseButtonDown { x, y, .. } => {
                     let dims = game.swapchain.dimensions();
                     let (w, h) = (dims[0], dims[1]);
-                    let ecks = (2*x - w as i32) as f32 / w as f32;
-                    let why  = (2*y - h as i32) as f32 / h as f32;
+                    let ecks = (2 * x - w as i32) as f32 / w as f32;
+                    let why = (2 * y - h as i32) as f32 / h as f32;
                     *space_buf.write().unwrap() = (ecks, why);
-                },
+                }
                 _ => println!("{:?}", event),
             }
         }
@@ -249,20 +281,32 @@ fn main() {
 
         let fb = game.framebuffers[image_num].clone();
 
-        let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(game.gpu.clone(), game.queue.family())
-            .unwrap()
-            .begin_render_pass(fb, false, vec![ClearValue::Float([0.0, 0.0, 1.0, 1.0])])
-            .unwrap()
-            .draw(game.pipeline.clone(), &game.dyn_state, vec![vert_buf.clone()], desc.clone(), ())
-            .expect("draw call failed")
-            .end_render_pass()
-            .unwrap()
-            .build()
-            .unwrap();
+        let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(
+            game.gpu.clone(),
+            game.queue.family(),
+        )
+        .unwrap()
+        .begin_render_pass(fb, false, vec![ClearValue::Float([0.0, 0.0, 1.0, 1.0])])
+        .unwrap()
+        .draw(
+            game.pipeline.clone(),
+            &game.dyn_state,
+            vec![vert_buf.clone()],
+            desc.clone(),
+            (),
+        )
+        .expect("draw call failed")
+        .end_render_pass()
+        .unwrap()
+        .build()
+        .unwrap();
 
-        let future = prev_frame_end.take().unwrap()
+        let future = prev_frame_end
+            .take()
+            .unwrap()
             .join(acquire_future)
-            .then_execute(game.queue.clone(), command_buffer).unwrap()
+            .then_execute(game.queue.clone(), command_buffer)
+            .unwrap()
             .then_swapchain_present(game.queue.clone(), game.swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 

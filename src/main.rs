@@ -10,7 +10,7 @@ use vulkano::{
     framebuffer::{self as vk_fb, Subpass, RenderPassDesc},
     image as vk_img,
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
-    pipeline::{viewport::Viewport, GraphicsPipeline},
+    pipeline::{viewport::Viewport, GraphicsPipeline, vertex::SingleBufferDefinition},
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
     sync::{self, GpuFuture},
     VulkanObject,
@@ -52,6 +52,7 @@ struct Game {
     queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Fragile<Window>>>,
     framebuffers: Vec<Arc<Framebuffer>>,
+    pipeline: Arc<GraphicsPipeline<SingleBufferDefinition<Vertex>, Box<dyn PipelineLayoutAbstract + Send + Sync>, Arc<RenderPass>>>,
 }
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
@@ -143,12 +144,27 @@ impl Game {
             })
             .collect::<Vec<_>>();
 
+        let vs = vs::Shader::load(gpu.clone()).unwrap();
+        let fs = fs::Shader::load(gpu.clone()).unwrap();
+        let pipeline = Arc::new(
+            GraphicsPipeline::start()
+            .vertex_input_single_buffer()
+            .vertex_shader(vs.main_entry_point(), ())
+            .triangle_list()
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .build(gpu.clone())
+            .unwrap()
+        );
+
         Self {
             sdl: sdl,
             gpu: gpu,
             queue: queue,
             swapchain: swapchain,
             framebuffers: framebuffers,
+            pipeline: pipeline,
         }
     }
 }
@@ -161,19 +177,6 @@ fn main() {
     let mut event_pump = game.sdl.event_pump().unwrap();
 
     let clear_values = [ClearValue::Float([0.0, 0.0, 1.0, 1.0])];
-    let vs = vs::Shader::load(game.gpu.clone()).unwrap();
-    let fs = fs::Shader::load(game.gpu.clone()).unwrap();
-    let pipeline = Arc::new(
-        GraphicsPipeline::start()
-            .vertex_input_single_buffer()
-            .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
-            .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from(game.framebuffers[0].render_pass().clone(), 0).unwrap())
-            .build(game.gpu.clone())
-            .unwrap(),
-    );
 
     let dyn_state = DynamicState {
         viewports: Some(vec![Viewport {
@@ -199,7 +202,7 @@ fn main() {
     };
 
     let (time_buf, space_buf, desc) = {
-        let layout = pipeline.descriptor_set_layout(0).unwrap();
+        let layout = game.pipeline.descriptor_set_layout(0).unwrap();
         let time_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0.0f32).unwrap();
         let space_buf = CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, (0.0f32, 0.0f32)).unwrap();
         let desc = PersistentDescriptorSet::start(layout.clone())
@@ -243,7 +246,7 @@ fn main() {
             .unwrap()
             .begin_render_pass(fb, false, clear_values.to_vec())
             .unwrap()
-            .draw(pipeline.clone(), &dyn_state, vert_buf.clone(), desc.clone(), ())
+            .draw(game.pipeline.clone(), &dyn_state, vert_buf.clone(), desc.clone(), ())
             .expect("draw call failed")
             .end_render_pass()
             .unwrap()

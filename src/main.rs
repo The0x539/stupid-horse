@@ -7,10 +7,9 @@ use vulkano::{
     descriptor::{descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract},
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
-    framebuffer::{self as vk_fb, Subpass, RenderPassDesc},
-    image as vk_img,
+    framebuffer::{self as vk_fb, Subpass, RenderPassDesc, FramebufferAbstract},
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
-    pipeline::{viewport::Viewport, GraphicsPipeline, vertex::SingleBufferDefinition},
+    pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract},
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
     sync::{self, GpuFuture},
     VulkanObject,
@@ -41,18 +40,13 @@ impl Vertex {
 
 vulkano::impl_vertex!(Vertex, position);
 
-type RenderPass = vk_fb::RenderPass<Desc>;
-type SwapchainImage = vk_img::SwapchainImage<Fragile<Window>>;
-type FramebufferImage = ((), Arc<SwapchainImage>);
-type Framebuffer = vk_fb::Framebuffer<Arc<RenderPass>, FramebufferImage>;
-
 struct Game {
     sdl: Sdl,
     gpu: Arc<Device>,
     queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Fragile<Window>>>,
-    framebuffers: Vec<Arc<Framebuffer>>,
-    pipeline: Arc<GraphicsPipeline<SingleBufferDefinition<Vertex>, Box<dyn PipelineLayoutAbstract + Send + Sync>, Arc<RenderPass>>>,
+    framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     dyn_state: DynamicState,
 }
 
@@ -133,7 +127,7 @@ impl Game {
         };
 
         let framebuffers = {
-            let mut fbs = Vec::new();
+            let mut fbs: Vec<Arc<dyn FramebufferAbstract + Send + Sync>> = Vec::new();
             for image in images {
                 let fb = vk_fb::Framebuffer::start(render_pass.clone())
                     .add(image.clone())
@@ -149,7 +143,7 @@ impl Game {
             let vs = vs::Shader::load(gpu.clone()).unwrap();
             let fs = fs::Shader::load(gpu.clone()).unwrap();
             let obj = GraphicsPipeline::start()
-                .vertex_input_single_buffer()
+                .vertex_input_single_buffer::<Vertex>()
                 .vertex_shader(vs.main_entry_point(), ())
                 .triangle_list()
                 .viewports_dynamic_scissors_irrelevant(1)
@@ -251,7 +245,7 @@ fn main() {
             .unwrap()
             .begin_render_pass(fb, false, vec![ClearValue::Float([0.0, 0.0, 1.0, 1.0])])
             .unwrap()
-            .draw(game.pipeline.clone(), &game.dyn_state, vert_buf.clone(), desc.clone(), ())
+            .draw(game.pipeline.clone(), &game.dyn_state, vec![vert_buf.clone()], desc.clone(), ())
             .expect("draw call failed")
             .end_render_pass()
             .unwrap()

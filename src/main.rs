@@ -53,6 +53,7 @@ struct Game {
     swapchain: Arc<Swapchain<Fragile<Window>>>,
     framebuffers: Vec<Arc<Framebuffer>>,
     pipeline: Arc<GraphicsPipeline<SingleBufferDefinition<Vertex>, Box<dyn PipelineLayoutAbstract + Send + Sync>, Arc<RenderPass>>>,
+    dyn_state: DynamicState,
 }
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
@@ -159,6 +160,19 @@ impl Game {
             Arc::new(obj)
         };
 
+        // No longer treating the DIMS const as authoritative
+        let dims = swapchain.dimensions();
+
+        let dyn_state = DynamicState {
+            viewports: Some(vec![Viewport {
+                origin: [0.0, 0.0],
+                // I have no idea why the API wants floats here
+                dimensions: [dims[0] as f32, dims[1] as f32],
+                depth_range: 0.0..1.0,
+            }]),
+            ..Default::default()
+        };
+
         Self {
             sdl: sdl,
             gpu: gpu,
@@ -166,6 +180,7 @@ impl Game {
             swapchain: swapchain,
             framebuffers: framebuffers,
             pipeline: pipeline,
+            dyn_state: dyn_state,
         }
     }
 }
@@ -176,15 +191,6 @@ fn main() {
     let mut prev_frame_end = Some(Box::new(sync::now(game.gpu.clone())) as Box<dyn GpuFuture>);
 
     let mut event_pump = game.sdl.event_pump().unwrap();
-
-    let dyn_state = DynamicState {
-        viewports: Some(vec![Viewport {
-            origin: [0.0, 0.0], 
-            dimensions: [game.swapchain.dimensions()[0] as f32, game.swapchain.dimensions()[1] as f32],
-            depth_range: 0.0..1.0,
-        }]),
-        ..Default::default()
-    };
 
     let vert_buf = {
         let verts = [
@@ -245,7 +251,7 @@ fn main() {
             .unwrap()
             .begin_render_pass(fb, false, vec![ClearValue::Float([0.0, 0.0, 1.0, 1.0])])
             .unwrap()
-            .draw(game.pipeline.clone(), &dyn_state, vert_buf.clone(), desc.clone(), ())
+            .draw(game.pipeline.clone(), &game.dyn_state, vert_buf.clone(), desc.clone(), ())
             .expect("draw call failed")
             .end_render_pass()
             .unwrap()

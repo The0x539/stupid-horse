@@ -131,32 +131,33 @@ impl Game {
             Arc::new(pass)
         };
 
-        let framebuffers = images
-            .iter()
-            .map(|image| {
-                Arc::new(
-                    vk_fb::Framebuffer::start(render_pass.clone())
-                        .add(image.clone())
-                        .unwrap()
-                        .build()
-                        .unwrap(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let framebuffers = {
+            let mut fbs = Vec::new();
+            for image in images {
+                let fb = vk_fb::Framebuffer::start(render_pass.clone())
+                    .add(image.clone())
+                    .unwrap()
+                    .build()
+                    .unwrap();
+                fbs.push(Arc::new(fb));
+            }
+            fbs
+        };
 
-        let vs = vs::Shader::load(gpu.clone()).unwrap();
-        let fs = fs::Shader::load(gpu.clone()).unwrap();
-        let pipeline = Arc::new(
-            GraphicsPipeline::start()
-            .vertex_input_single_buffer()
-            .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
-            .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .build(gpu.clone())
-            .unwrap()
-        );
+        let pipeline = {
+            let vs = vs::Shader::load(gpu.clone()).unwrap();
+            let fs = fs::Shader::load(gpu.clone()).unwrap();
+            let obj = GraphicsPipeline::start()
+                .vertex_input_single_buffer()
+                .vertex_shader(vs.main_entry_point(), ())
+                .triangle_list()
+                .viewports_dynamic_scissors_irrelevant(1)
+                .fragment_shader(fs.main_entry_point(), ())
+                .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+                .build(gpu.clone())
+                .unwrap();
+            Arc::new(obj)
+        };
 
         Self {
             sdl: sdl,

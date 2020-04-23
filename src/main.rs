@@ -230,7 +230,7 @@ impl Game {
 }
 
 macro_rules! tris {
-    ($(($v1:expr, $v2:expr, $v3:expr, $c:expr)),*) => {
+    ($(($v1:expr, $v2:expr, $v3:expr, $c:expr)),*$(,)*) => {
         [$(
             Vertex::new($v1, $c),
             Vertex::new($v2, $c),
@@ -259,22 +259,15 @@ fn main() {
         let gray3 = [0.75, 0.75, 0.75, 1.0];
         let white = [1.0, 1.0, 1.0, 1.0];
 
-        #[rustfmt::skip]
-        let verts = tris! [
+        let verts = tris![
             (topleft, topright, center, black),
             (topright, bottomright, center, gray1),
             (bottomright, bottomleft, center, gray2),
             (bottomleft, topleft, center, gray3),
-            ([-0.125, -0.125], [0.125, -0.125], [0.0, 0.125], white)
+            ([-0.125, -0.125], [0.125, -0.125], [0.0, 0.125], white),
         ];
 
-        CpuAccessibleBuffer::from_iter(
-            game.gpu.clone(),
-            BufferUsage::all(),
-            false,
-            verts.iter().cloned(),
-        )
-        .unwrap()
+        CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
     };
 
     let (time_buf, space_buf, dims_buf, desc) = {

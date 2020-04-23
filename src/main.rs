@@ -5,7 +5,7 @@ use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, DynamicState},
     descriptor::{
-        descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract,
+        descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract,  descriptor_set::DescriptorSet,
     },
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
@@ -270,37 +270,28 @@ fn main() {
         CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
     };
 
-    let (time_buf, space_buf, dims_buf, desc) = {
+    let (uniforms, uniforms_desc) = {
         let layout = game.pipeline.descriptor_set_layout(0).unwrap();
-        let time_buf =
-            CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0.0f32)
-                .unwrap();
-        let space_buf = CpuAccessibleBuffer::from_data(
+
+        let buf = CpuAccessibleBuffer::from_data(
             game.gpu.clone(),
             BufferUsage::all(),
             false,
-            (0.0f32, 0.0f32),
+            (
+                0.0f32, // time
+                (0.0f32, 0.0f32), // click position
+                game.swapchain.dimensions(), // window dimensions
+            )
         )
         .unwrap();
-        let dims = game.swapchain.dimensions();
-        let dims_buf = CpuAccessibleBuffer::from_data(
-            game.gpu.clone(),
-            BufferUsage::all(),
-            false,
-            (dims[0] as f32, dims[1] as f32),
-        )
-        .unwrap();
+
         let desc = PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(time_buf.clone())
-            .unwrap()
-            .add_buffer(space_buf.clone())
-            .unwrap()
-            .add_buffer(dims_buf.clone())
+            .add_buffer(buf.clone())
             .unwrap()
             .build()
             .unwrap();
 
-        (time_buf, space_buf, dims_buf, Arc::new(desc))
+        (buf, Arc::new(desc))
     };
 
     let mut rebuild_swapchain = false;
@@ -312,8 +303,7 @@ fn main() {
         // no idea whether this even counts as an event loop
         if rebuild_swapchain {
             game.rebuild_swapchain();
-            let dims = game.swapchain.dimensions();
-            *dims_buf.write().unwrap() = (dims[0] as f32, dims[1] as f32);
+            uniforms.write().unwrap().2 = game.swapchain.dimensions();
             rebuild_swapchain = false;
         }
 
@@ -326,13 +316,13 @@ fn main() {
                     let (w, h) = (dims[0], dims[1]);
                     let ecks = (2 * x - w as i32) as f32 / w as f32;
                     let why = (2 * y - h as i32) as f32 / h as f32;
-                    *space_buf.write().unwrap() = (ecks, why);
+                    uniforms.write().unwrap().1 = (ecks, why);
                 }
                 _ => println!("{:?}", event),
             }
         }
 
-        *time_buf.write().unwrap() += 0.1;
+        uniforms.write().unwrap().0 += 0.1;
 
         let (image_num, suboptimal, acquire_future) =
             swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();
@@ -354,7 +344,7 @@ fn main() {
             game.pipeline.clone(),
             &game.dyn_state,
             vec![bg_verts.clone()],
-            desc.clone(),
+            uniforms_desc.clone(),
             (),
         )
         .expect("draw call failed")

@@ -5,7 +5,7 @@ use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, DynamicState},
     descriptor::{
-        descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract,  descriptor_set::DescriptorSet,
+        descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract,
     },
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
@@ -272,16 +272,18 @@ fn main() {
 
     let (uniforms, uniforms_desc) = {
         let layout = game.pipeline.descriptor_set_layout(0).unwrap();
+        let dims = game.swapchain.dimensions();
 
         let buf = CpuAccessibleBuffer::from_data(
             game.gpu.clone(),
             BufferUsage::all(),
             false,
             (
-                0.0f32, // time
-                (0.0f32, 0.0f32), // click position
-                game.swapchain.dimensions(), // window dimensions
-            )
+                // beware of alignment discrepancies between GLSL and Rust
+                (0.0f32, 0.0f32),                 // click position
+                (dims[0] as f32, dims[1] as f32), // window dimensions
+                0.0f32,                           // time
+            ),
         )
         .unwrap();
 
@@ -303,7 +305,8 @@ fn main() {
         // no idea whether this even counts as an event loop
         if rebuild_swapchain {
             game.rebuild_swapchain();
-            uniforms.write().unwrap().2 = game.swapchain.dimensions();
+            let dims = game.swapchain.dimensions();
+            uniforms.write().unwrap().1 = (dims[0] as f32, dims[1] as f32);
             rebuild_swapchain = false;
         }
 
@@ -314,15 +317,16 @@ fn main() {
                 Event::MouseButtonDown { x, y, .. } => {
                     let dims = game.swapchain.dimensions();
                     let (w, h) = (dims[0], dims[1]);
-                    let ecks = (2 * x - w as i32) as f32 / w as f32;
-                    let why = (2 * y - h as i32) as f32 / h as f32;
-                    uniforms.write().unwrap().1 = (ecks, why);
+                    uniforms.write().unwrap().0 = (
+                        (2 * x - w as i32) as f32 / w as f32,
+                        (2 * y - h as i32) as f32 / h as f32,
+                    );
                 }
                 _ => println!("{:?}", event),
             }
         }
 
-        uniforms.write().unwrap().0 += 0.1;
+        uniforms.write().unwrap().2 += 0.1;
 
         let (image_num, suboptimal, acquire_future) =
             swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();

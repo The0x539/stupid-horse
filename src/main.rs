@@ -33,16 +33,20 @@ static DIMS: [u32; 2] = [600, 600];
 
 #[derive(Default, Copy, Clone)]
 struct Vertex {
-    position: (f32, f32),
+    a_position: [f32; 2],
+    a_color: [f32; 4],
 }
 
 impl Vertex {
-    pub fn new(x: f32, y: f32) -> Self {
-        Vertex { position: (x, y) }
+    pub fn new(xy: [f32; 2], rgba: [f32; 4]) -> Self {
+        Vertex {
+            a_position: xy,
+            a_color: rgba,
+        }
     }
 }
 
-vulkano::impl_vertex!(Vertex, position);
+vulkano::impl_vertex!(Vertex, a_position, a_color);
 
 struct Game {
     sdl: Sdl,
@@ -225,6 +229,16 @@ impl Game {
     }
 }
 
+macro_rules! tris {
+    ($(($v1:expr, $v2:expr, $v3:expr, $c:expr)),*) => {
+        [$(
+            Vertex::new($v1, $c),
+            Vertex::new($v2, $c),
+            Vertex::new($v3, $c)
+        ),*]
+    }
+}
+
 fn main() {
     let mut game = Game::new();
 
@@ -232,16 +246,26 @@ fn main() {
 
     let mut event_pump = game.sdl.event_pump().unwrap();
 
-    let vert_buf = {
-        #[rustfmt::skip]
-        let verts = [
-            Vertex::new( 0.0,  0.0),
-            Vertex::new(-1.0, -1.0),
-            Vertex::new( 0.5, -0.5),
+    let bg_verts = {
+        let topleft = [-1.0, -1.0];
+        let topright = [1.0, -1.0];
+        let bottomleft = [-1.0, 1.0];
+        let bottomright = [1.0, 1.0];
+        let center = [0.0, 0.0];
 
-            Vertex::new( 0.0, 0.0),
-            Vertex::new(-0.5, 0.5),
-            Vertex::new( 1.0, 1.0),
+        let black = [0.0, 0.0, 0.0, 1.0];
+        let gray1 = [0.25, 0.25, 0.25, 1.0];
+        let gray2 = [0.5, 0.5, 0.5, 1.0];
+        let gray3 = [0.75, 0.75, 0.75, 1.0];
+        let white = [1.0, 1.0, 1.0, 1.0];
+
+        #[rustfmt::skip]
+        let verts = tris! [
+            (topleft, topright, center, black),
+            (topright, bottomright, center, gray1),
+            (bottomright, bottomleft, center, gray2),
+            (bottomleft, topleft, center, gray3),
+            ([-0.125, -0.125], [0.125, -0.125], [0.0, 0.125], white)
         ];
 
         CpuAccessibleBuffer::from_iter(
@@ -336,7 +360,7 @@ fn main() {
         .draw(
             game.pipeline.clone(),
             &game.dyn_state,
-            vec![vert_buf.clone()],
+            vec![bg_verts.clone()],
             desc.clone(),
             (),
         )

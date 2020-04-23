@@ -14,11 +14,14 @@ layout(binding = 2) uniform more_stuff {
 	vec2 window_dims;
 };
 
-layout(location = 0) in vec2 position;
+layout(location = 0) in vec2 a_position;
+layout(location = 1) in vec4 a_color;
+
+layout(location = 0) out vec4 v_color;
 
 void main() {
-	float r = length(position);
-	float theta = atan(position.y, position.x);
+	float r = length(a_position);
+	float theta = atan(a_position.y, a_position.x);
 	//theta += time/10;
 	vec2 pos = vec2(r*cos(theta), r*sin(theta));
 
@@ -30,4 +33,5 @@ void main() {
 	//pos += click_pos;
 
 	gl_Position = vec4(pos.xy, 0.0, 1.0);
+	v_color = a_color;
 }

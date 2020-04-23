@@ -236,12 +236,12 @@ fn main() {
         #[rustfmt::skip]
         let verts = [
             Vertex::new( 0.0,  0.0),
-            Vertex::new(-0.5, -0.5),
+            Vertex::new(-1.0, -1.0),
             Vertex::new( 0.5, -0.5),
 
             Vertex::new( 0.0, 0.0),
             Vertex::new(-0.5, 0.5),
-            Vertex::new( 0.5, 0.5),
+            Vertex::new( 1.0, 1.0),
         ];
 
         CpuAccessibleBuffer::from_iter(
@@ -253,7 +253,7 @@ fn main() {
         .unwrap()
     };
 
-    let (time_buf, space_buf, desc) = {
+    let (time_buf, space_buf, dims_buf, desc) = {
         let layout = game.pipeline.descriptor_set_layout(0).unwrap();
         let time_buf =
             CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, 0.0f32)
@@ -265,28 +265,40 @@ fn main() {
             (0.0f32, 0.0f32),
         )
         .unwrap();
+        let dims = game.swapchain.dimensions();
+        let dims_buf = CpuAccessibleBuffer::from_data(
+            game.gpu.clone(),
+            BufferUsage::all(),
+            false,
+            (dims[0] as f32, dims[1] as f32),
+        )
+        .unwrap();
         let desc = PersistentDescriptorSet::start(layout.clone())
             .add_buffer(time_buf.clone())
             .unwrap()
             .add_buffer(space_buf.clone())
             .unwrap()
+            .add_buffer(dims_buf.clone())
+            .unwrap()
             .build()
             .unwrap();
 
-        (time_buf, space_buf, Arc::new(desc))
+        (time_buf, space_buf, dims_buf, Arc::new(desc))
     };
 
     let mut rebuild_swapchain = false;
 
     'running: loop {
+        prev_frame_end.as_mut().unwrap().cleanup_finished();
+
         // no idea where in the event loop this should actually take place
         // no idea whether this even counts as an event loop
         if rebuild_swapchain {
             game.rebuild_swapchain();
+            let dims = game.swapchain.dimensions();
+            *dims_buf.write().unwrap() = (dims[0] as f32, dims[1] as f32);
             rebuild_swapchain = false;
         }
-
-        prev_frame_end.as_mut().unwrap().cleanup_finished();
 
         for event in event_pump.poll_iter() {
             match event {

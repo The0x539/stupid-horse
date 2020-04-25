@@ -7,6 +7,7 @@ layout(binding = 0) uniform stuff {
 	vec2 click_pos;
 	vec2 dims;
 	float time;
+	float scale;
 };
 
 layout(location = 0) in vec2 a_position;
@@ -15,7 +16,7 @@ layout(location = 1) in vec3 a_color;
 layout(location = 0) out vec3 v_color;
 
 void main() {
-	float r = length(a_position);
+	float r = length(a_position) * scale;
 	float theta = atan(a_position.y, a_position.x);
 	theta += time/10;
 	vec2 pos = vec2(r*cos(theta), r*sin(theta));

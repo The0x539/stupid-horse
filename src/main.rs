@@ -336,6 +336,7 @@ fn main() {
                 click_pos: (0.0f32, 0.0f32),
                 window_dims: (dims[0] as f32, dims[1] as f32),
                 time: 0.0f32,
+                scale: 0.5f32,
             },
         )
         .unwrap();
@@ -381,6 +382,9 @@ fn main() {
                         (2 * y - h as i32) as f32 / h as f32,
                     );
                     fg_uniforms.write().unwrap().click_pos = new_pos;
+                }
+                Event::MouseWheel { y, .. } => {
+                    fg_uniforms.write().unwrap().scale *= f32::powi(0.9, -y);
                 }
                 _ => println!("{:?}", event),
             }

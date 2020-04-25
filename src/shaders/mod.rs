@@ -39,5 +39,6 @@ pub(crate) mod fg {
         pub click_pos: (f32, f32),
         pub window_dims: (f32, f32),
         pub time: f32,
+        pub scale: f32,
     }
 }

@@ -29,14 +29,14 @@ static DIMS: [u32; 2] = [600, 600];
 #[derive(Default, Copy, Clone)]
 struct Vertex {
     a_position: [f32; 2],
-    a_color: [f32; 4],
+    a_color: [f32; 3],
 }
 
 impl Vertex {
-    pub fn new(xy: [f32; 2], rgba: [f32; 4]) -> Self {
+    pub fn new(xy: [f32; 2], rgb: [f32; 3]) -> Self {
         Vertex {
             a_position: xy,
-            a_color: rgba,
+            a_color: rgb,
         }
     }
 }
@@ -231,11 +231,11 @@ fn main() {
         let bottomright = [1.0, 1.0];
         let center = [0.0, 0.0];
 
-        let black = [0.0, 0.0, 0.0, 1.0];
-        let gray1 = [0.25, 0.25, 0.25, 1.0];
-        let gray2 = [0.5, 0.5, 0.5, 1.0];
-        let gray3 = [0.75, 0.75, 0.75, 1.0];
-        let white = [1.0, 1.0, 1.0, 1.0];
+        let black = [0.0, 0.0, 0.0];
+        let gray1 = [0.25, 0.25, 0.25];
+        let gray2 = [0.5, 0.5, 0.5];
+        let gray3 = [0.75, 0.75, 0.75];
+        let white = [1.0, 1.0, 1.0];
 
         let verts = tris![
             (topleft, topright, center, black),
@@ -249,9 +249,9 @@ fn main() {
     };
 
     let fg_verts = {
-        let red = [1.0, 0.0, 0.0, 1.0];
-        let green = [0.0, 1.0, 0.0, 1.0];
-        let blue = [0.0, 0.0, 1.0, 1.0];
+        let red = [1.0, 0.0, 0.0];
+        let green = [0.0, 1.0, 0.0];
+        let blue = [0.0, 0.0, 1.0];
 
         // the six points in a triforce, starting at the top and going clockwise
         let p = (

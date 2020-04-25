@@ -22,12 +22,7 @@ use sdl2::{event::Event, video::Window, Sdl};
 
 use fragile::Fragile;
 
-mod vs {
-    vulkano_shaders::shader! { ty: "vertex", path: "src/shaders/vertex.glsl" }
-}
-mod fs {
-    vulkano_shaders::shader! { ty: "fragment", path: "src/shaders/fragment.glsl" }
-}
+mod shaders;
 
 static DIMS: [u32; 2] = [600, 600];
 
@@ -194,8 +189,8 @@ impl Game {
         let framebuffers = Self::make_framebuffers(images, render_pass.clone());
 
         let pipeline = {
-            let vs = vs::Shader::load(gpu.clone()).unwrap();
-            let fs = fs::Shader::load(gpu.clone()).unwrap();
+            let vs = shaders::bg::vert::Shader::load(gpu.clone()).unwrap();
+            let fs = shaders::bg::frag::Shader::load(gpu.clone()).unwrap();
             let obj = GraphicsPipeline::start()
                 .vertex_input_single_buffer::<Vertex>()
                 .vertex_shader(vs.main_entry_point(), ())

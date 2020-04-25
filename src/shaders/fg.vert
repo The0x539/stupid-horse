@@ -3,9 +3,7 @@
 precision mediump float;
 
 layout(binding = 0) uniform stuff {
-	// beware of alignment discrepancies between GLSL and Rust
 	vec2 click_pos;
-	vec2 dims;
 	float time;
 	float scale;
 };
@@ -20,10 +18,6 @@ void main() {
 	float theta = atan(a_position.y, a_position.x);
 	theta += time/10;
 	vec2 pos = vec2(r*cos(theta), r*sin(theta));
-
-	float aspect_ratio = dims.x / dims.y;
-	pos.x /= max(aspect_ratio, 1.0); // if wide, shrink x
-	pos.y *= min(aspect_ratio, 1.0); // if tall, shrink y
 
 	pos += click_pos;
 

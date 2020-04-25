@@ -12,11 +12,6 @@ pub(crate) mod bg {
             path: "src/shaders/bg.frag"
         }
     }
-
-    #[repr(C)]
-    pub(crate) struct Uniforms {
-        pub window_dims: (f32, f32),
-    }
 }
 
 pub(crate) mod fg {
@@ -37,7 +32,6 @@ pub(crate) mod fg {
     #[repr(C)]
     pub(crate) struct Uniforms {
         pub click_pos: (f32, f32),
-        pub window_dims: (f32, f32),
         pub time: f32,
         pub scale: f32,
     }

@@ -24,7 +24,9 @@ use fragile::Fragile;
 
 mod shaders;
 
-static DIMS: [u32; 2] = [600, 600];
+static WIN_WIDTH: u32 = 540;
+static WIN_HEIGHT: u32 = 540;
+static ASPECT_RATIO: f32 = WIN_WIDTH as f32 / WIN_HEIGHT as f32;
 
 #[derive(Default, Copy, Clone)]
 struct Vertex {
@@ -62,15 +64,6 @@ fn required_extensions(window: &Window) -> RawInstanceExtensions {
         .collect()
 }
 
-fn make_viewport(w: u32, h: u32) -> Viewport {
-    Viewport {
-        origin: [0.0, 0.0],
-        // I have no idea why the API wants floats here
-        dimensions: [w as f32, h as f32],
-        depth_range: 0.0..1.0,
-    }
-}
-
 impl Game {
     fn make_framebuffers(
         images: Vec<Arc<SwapchainImage<Fragile<Window>>>>,
@@ -89,7 +82,22 @@ impl Game {
             .collect()
     }
 
-    pub fn rebuild_swapchain(&mut self) -> (f32, f32) {
+    fn make_viewport([w, h]: [u32; 2]) -> Viewport {
+        let (win_w, win_h) = (w as f32, h as f32);
+        let vp_w = win_w.min(win_h * ASPECT_RATIO);
+        let vp_h = win_h.min(win_w / ASPECT_RATIO);
+        Viewport {
+            origin: [(win_w - vp_w) / 2.0, (win_h - vp_h) / 2.0],
+            dimensions: [vp_w, vp_h],
+            depth_range: 0.0..1.0,
+        }
+    }
+
+    pub fn get_viewport(&self) -> Viewport {
+        self.dyn_state.viewports.as_ref().unwrap()[0].clone()
+    }
+
+    pub fn rebuild_swapchain(&mut self) {
         let surface = self.swapchain.surface();
         let window = surface.window().get();
         let (w, h) = window.vulkan_drawable_size();
@@ -97,9 +105,7 @@ impl Game {
         let (new_sc, new_imgs) = self.swapchain.recreate_with_dimensions([w, h]).unwrap();
         self.swapchain = new_sc;
         self.framebuffers = Self::make_framebuffers(new_imgs, self.render_pass.clone());
-        self.dyn_state.viewports.replace(vec![make_viewport(w, h)]);
-
-        (w as f32, h as f32)
+        self.dyn_state.viewports.as_mut().unwrap()[0] = Self::make_viewport([w, h]);
     }
 
     pub fn new() -> Self {
@@ -107,7 +113,7 @@ impl Game {
         let video_subsystem = sdl.video().unwrap();
 
         let window = video_subsystem
-            .window("stupid horse", DIMS[0], DIMS[1])
+            .window("stupid horse", WIN_WIDTH, WIN_HEIGHT)
             .resizable()
             .vulkan()
             .build()
@@ -157,7 +163,7 @@ impl Game {
             surface.clone(),
             caps.min_image_count,
             caps.supported_formats[0].0,
-            caps.current_extent.unwrap_or(DIMS),
+            [WIN_WIDTH, WIN_HEIGHT],
             1,
             caps.supported_usage_flags,
             &queue,
@@ -189,9 +195,8 @@ impl Game {
         let framebuffers = Self::make_framebuffers(images, render_pass.clone());
 
         // No longer treating the DIMS const as authoritative
-        let [w, h] = swapchain.dimensions();
         let dyn_state = DynamicState {
-            viewports: Some(vec![make_viewport(w, h)]),
+            viewports: Some(vec![Self::make_viewport(swapchain.dimensions())]),
             ..Default::default()
         };
 
@@ -217,43 +222,55 @@ macro_rules! tris {
     }
 }
 
+// Probably shouldn't be a macro
 macro_rules! draw_call {
-    ($game:expr, $vs:path, $fs:path, $vertex:ty, $uniforms:expr$(,)?) => {
-        {
-            let vs = $vs($game.gpu.clone()).unwrap();
-            let fs = $fs($game.gpu.clone()).unwrap();
-            let pipeline = GraphicsPipeline::start()
-                .vertex_input_single_buffer::<$vertex>()
-                .vertex_shader(vs.main_entry_point(), ())
-                .triangle_list()
-                .viewports_dynamic_scissors_irrelevant(1)
-                .fragment_shader(fs.main_entry_point(), ())
-                .render_pass(Subpass::from($game.render_pass.clone(), 0).unwrap())
-                .build($game.gpu.clone())
-                .unwrap();
-
-            let buf = CpuAccessibleBuffer::from_data(
-                $game.gpu.clone(),
-                BufferUsage::all(),
-                false,
-                $uniforms,
-            )
+    ($game:expr, $vs:path, $fs:path, $vertex:ty, $uniforms:expr$(,)?) => {{
+        let vs = $vs($game.gpu.clone()).unwrap();
+        let fs = $fs($game.gpu.clone()).unwrap();
+        let pipeline = GraphicsPipeline::start()
+            .vertex_input_single_buffer::<$vertex>()
+            .vertex_shader(vs.main_entry_point(), ())
+            .triangle_list()
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from($game.render_pass.clone(), 0).unwrap())
+            .build($game.gpu.clone())
             .unwrap();
 
-            let layout = pipeline.descriptor_set_layout(0).unwrap();
-            let desc = PersistentDescriptorSet::start(layout.clone())
-                .add_buffer(buf.clone())
-                .unwrap()
-                .build()
+        let buf =
+            CpuAccessibleBuffer::from_data($game.gpu.clone(), BufferUsage::all(), false, $uniforms)
                 .unwrap();
 
-            (
-                buf,
-                Arc::new(desc),
-                Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-            )
-        }
-    };
+        let layout = pipeline.descriptor_set_layout(0).unwrap();
+
+        let desc = PersistentDescriptorSet::start(layout.clone())
+            .add_buffer(buf.clone())
+            .unwrap()
+            .build()
+            .unwrap();
+
+        (
+            buf,
+            Arc::new(desc),
+            Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+        )
+    }};
+
+    ($game:expr, $vs:path, $fs:path, $vertex:ty$(,)?) => {{
+        let vs = $vs($game.gpu.clone()).unwrap();
+        let fs = $fs($game.gpu.clone()).unwrap();
+        let pipeline = GraphicsPipeline::start()
+            .vertex_input_single_buffer::<$vertex>()
+            .vertex_shader(vs.main_entry_point(), ())
+            .triangle_list()
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from($game.render_pass.clone(), 0).unwrap())
+            .build($game.gpu.clone())
+            .unwrap();
+
+        Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>
+    }};
 }
 
 fn main() {
@@ -311,13 +328,11 @@ fn main() {
         CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
     };
 
-    let [w, h] = game.swapchain.dimensions();
-    let (bg_uniforms, bg_desc, bg_pipeline) = draw_call!(
+    let bg_pipeline = draw_call!(
         game,
         shaders::bg::vert::Shader::load,
         shaders::bg::frag::Shader::load,
         Vertex,
-        shaders::bg::Uniforms { window_dims: (w as f32, h as f32) },
     );
     let (fg_uniforms, fg_desc, fg_pipeline) = draw_call!(
         game,
@@ -326,7 +341,6 @@ fn main() {
         Vertex,
         shaders::fg::Uniforms {
             click_pos: (0.0f32, 0.0f32),
-            window_dims: (w as f32, h as f32),
             time: 0.0f32,
             scale: 0.5f32,
         },
@@ -340,9 +354,7 @@ fn main() {
         // no idea where in the event loop this should actually take place
         // no idea whether this even counts as an event loop
         if rebuild_swapchain {
-            let new_dims = game.rebuild_swapchain();
-            bg_uniforms.write().unwrap().window_dims = new_dims;
-            fg_uniforms.write().unwrap().window_dims = new_dims;
+            game.rebuild_swapchain();
             rebuild_swapchain = false;
         }
 
@@ -351,12 +363,17 @@ fn main() {
                 Event::Quit { .. } => break 'running,
                 Event::MouseMotion { .. } => (),
                 Event::MouseButtonDown { x, y, .. } => {
-                    // number types are kind of a nightmare here
-                    let [w, h] = game.swapchain.dimensions();
+                    let Viewport {
+                        origin: [vp_x, vp_y],
+                        dimensions: [vp_w, vp_h],
+                        ..
+                    } = game.get_viewport();
+
                     let new_pos = (
-                        (2 * x - w as i32) as f32 / w as f32,
-                        (2 * y - h as i32) as f32 / h as f32,
+                        (x as f32 - vp_x) * 2.0 / vp_w - 1.0,
+                        (y as f32 - vp_y) * 2.0 / vp_h - 1.0,
                     );
+
                     fg_uniforms.write().unwrap().click_pos = new_pos;
                 }
                 Event::MouseWheel { y, .. } => {
@@ -388,7 +405,7 @@ fn main() {
             bg_pipeline.clone(),
             &game.dyn_state,
             vec![bg_verts.clone()],
-            bg_desc.clone(),
+            (),
             (),
         )
         .expect("bg draw call failed")

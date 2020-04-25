@@ -49,7 +49,6 @@ struct Game {
     queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Fragile<Window>>>,
     framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-    pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     dyn_state: DynamicState,
     render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
 }
@@ -188,21 +187,6 @@ impl Game {
 
         let framebuffers = Self::make_framebuffers(images, render_pass.clone());
 
-        let pipeline = {
-            let vs = shaders::bg::vert::Shader::load(gpu.clone()).unwrap();
-            let fs = shaders::bg::frag::Shader::load(gpu.clone()).unwrap();
-            let obj = GraphicsPipeline::start()
-                .vertex_input_single_buffer::<Vertex>()
-                .vertex_shader(vs.main_entry_point(), ())
-                .triangle_list()
-                .viewports_dynamic_scissors_irrelevant(1)
-                .fragment_shader(fs.main_entry_point(), ())
-                .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-                .build(gpu.clone())
-                .unwrap();
-            Arc::new(obj)
-        };
-
         // No longer treating the DIMS const as authoritative
         let dims = swapchain.dimensions();
 
@@ -217,7 +201,6 @@ impl Game {
             queue: queue,
             swapchain: swapchain,
             framebuffers: framebuffers,
-            pipeline: pipeline,
             dyn_state: dyn_state,
             render_pass: render_pass,
         }
@@ -265,8 +248,45 @@ fn main() {
         CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
     };
 
-    let (uniforms, uniforms_desc) = {
-        let layout = game.pipeline.descriptor_set_layout(0).unwrap();
+    let fg_verts = {
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let green = [0.0, 1.0, 0.0, 1.0];
+        let blue = [0.0, 0.0, 1.0, 1.0];
+
+        // the six points in a triforce, starting at the top and going clockwise
+        let p = (
+            [0.0, 1.0],
+            [f32::sqrt(3.0) / 4.0, 0.25],
+            [f32::sqrt(3.0) / 2.0, -0.5],
+            [0.0, -0.5],
+            [-f32::sqrt(3.0) / 2.0, -0.5],
+            [-f32::sqrt(3.0) / 4.0, 0.25],
+        );
+
+        let verts = tris![
+            (p.0, p.1, p.5, red),
+            (p.1, p.2, p.3, green),
+            (p.5, p.3, p.4, blue),
+        ];
+
+        CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
+    };
+
+    let (bg_uniforms, bg_desc, bg_pipeline) = {
+        let vs = shaders::bg::vert::Shader::load(game.gpu.clone()).unwrap();
+        let fs = shaders::bg::frag::Shader::load(game.gpu.clone()).unwrap();
+        let pipeline = GraphicsPipeline::start()
+            .vertex_input_single_buffer::<Vertex>()
+            .vertex_shader(vs.main_entry_point(), ())
+            .triangle_list()
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from(game.render_pass.clone(), 0).unwrap())
+            .build(game.gpu.clone())
+            .unwrap();
+
+        let layout = pipeline.descriptor_set_layout(0).unwrap();
+
         let dims = game.swapchain.dimensions();
 
         let buf = CpuAccessibleBuffer::from_data(
@@ -274,6 +294,45 @@ fn main() {
             BufferUsage::all(),
             false,
             shaders::bg::Uniforms {
+                window_dims: (dims[0] as f32, dims[1] as f32),
+            },
+        )
+        .unwrap();
+
+        let desc = PersistentDescriptorSet::start(layout.clone())
+            .add_buffer(buf.clone())
+            .unwrap()
+            .build()
+            .unwrap();
+
+        (
+            buf,
+            Arc::new(desc),
+            Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+        )
+    };
+
+    let (fg_uniforms, fg_desc, fg_pipeline) = {
+        let vs = shaders::fg::vert::Shader::load(game.gpu.clone()).unwrap();
+        let fs = shaders::fg::frag::Shader::load(game.gpu.clone()).unwrap();
+        let pipeline = GraphicsPipeline::start()
+            .vertex_input_single_buffer::<Vertex>()
+            .vertex_shader(vs.main_entry_point(), ())
+            .triangle_list()
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from(game.render_pass.clone(), 0).unwrap())
+            .build(game.gpu.clone())
+            .unwrap();
+
+        let layout = pipeline.descriptor_set_layout(0).unwrap();
+        let dims = game.swapchain.dimensions();
+
+        let buf = CpuAccessibleBuffer::from_data(
+            game.gpu.clone(),
+            BufferUsage::all(),
+            false,
+            shaders::fg::Uniforms {
                 click_pos: (0.0f32, 0.0f32),
                 window_dims: (dims[0] as f32, dims[1] as f32),
                 time: 0.0f32,
@@ -287,7 +346,11 @@ fn main() {
             .build()
             .unwrap();
 
-        (buf, Arc::new(desc))
+        (
+            buf,
+            Arc::new(desc),
+            Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+        )
     };
 
     let mut rebuild_swapchain = false;
@@ -300,7 +363,9 @@ fn main() {
         if rebuild_swapchain {
             game.rebuild_swapchain();
             let dims = game.swapchain.dimensions();
-            uniforms.write().unwrap().window_dims = (dims[0] as f32, dims[1] as f32);
+            let new_dims = (dims[0] as f32, dims[1] as f32);
+            bg_uniforms.write().unwrap().window_dims = new_dims;
+            fg_uniforms.write().unwrap().window_dims = new_dims;
             rebuild_swapchain = false;
         }
 
@@ -311,16 +376,17 @@ fn main() {
                 Event::MouseButtonDown { x, y, .. } => {
                     let dims = game.swapchain.dimensions();
                     let (w, h) = (dims[0], dims[1]);
-                    uniforms.write().unwrap().click_pos = (
+                    let new_pos = (
                         (2 * x - w as i32) as f32 / w as f32,
                         (2 * y - h as i32) as f32 / h as f32,
                     );
+                    fg_uniforms.write().unwrap().click_pos = new_pos;
                 }
                 _ => println!("{:?}", event),
             }
         }
 
-        uniforms.write().unwrap().time += 0.1;
+        fg_uniforms.write().unwrap().time += 0.1;
 
         let (image_num, suboptimal, acquire_future) =
             swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();
@@ -339,13 +405,21 @@ fn main() {
         .begin_render_pass(fb, false, vec![ClearValue::Float([0.0, 0.0, 1.0, 1.0])])
         .unwrap()
         .draw(
-            game.pipeline.clone(),
+            bg_pipeline.clone(),
             &game.dyn_state,
             vec![bg_verts.clone()],
-            uniforms_desc.clone(),
+            bg_desc.clone(),
             (),
         )
-        .expect("draw call failed")
+        .expect("bg draw call failed")
+        .draw(
+            fg_pipeline.clone(),
+            &game.dyn_state,
+            vec![fg_verts.clone()],
+            fg_desc.clone(),
+            (),
+        )
+        .expect("fg draw call failed")
         .end_render_pass()
         .unwrap()
         .build()

@@ -188,10 +188,9 @@ impl Game {
         let framebuffers = Self::make_framebuffers(images, render_pass.clone());
 
         // No longer treating the DIMS const as authoritative
-        let dims = swapchain.dimensions();
-
+        let [w, h] = swapchain.dimensions();
         let dyn_state = DynamicState {
-            viewports: Some(vec![make_viewport(dims[0], dims[1])]),
+            viewports: Some(vec![make_viewport(w, h)]),
             ..Default::default()
         };
 
@@ -287,14 +286,13 @@ fn main() {
 
         let layout = pipeline.descriptor_set_layout(0).unwrap();
 
-        let dims = game.swapchain.dimensions();
-
+        let [w, h] = game.swapchain.dimensions();
         let buf = CpuAccessibleBuffer::from_data(
             game.gpu.clone(),
             BufferUsage::all(),
             false,
             shaders::bg::Uniforms {
-                window_dims: (dims[0] as f32, dims[1] as f32),
+                window_dims: (w as f32, h as f32),
             },
         )
         .unwrap();
@@ -326,7 +324,7 @@ fn main() {
             .unwrap();
 
         let layout = pipeline.descriptor_set_layout(0).unwrap();
-        let dims = game.swapchain.dimensions();
+        let [w, h] = game.swapchain.dimensions();
 
         let buf = CpuAccessibleBuffer::from_data(
             game.gpu.clone(),
@@ -334,7 +332,7 @@ fn main() {
             false,
             shaders::fg::Uniforms {
                 click_pos: (0.0f32, 0.0f32),
-                window_dims: (dims[0] as f32, dims[1] as f32),
+                window_dims: (w as f32, h as f32),
                 time: 0.0f32,
                 scale: 0.5f32,
             },
@@ -363,8 +361,8 @@ fn main() {
         // no idea whether this even counts as an event loop
         if rebuild_swapchain {
             game.rebuild_swapchain();
-            let dims = game.swapchain.dimensions();
-            let new_dims = (dims[0] as f32, dims[1] as f32);
+            let [w, h] = game.swapchain.dimensions();
+            let new_dims = (w as f32, h as f32);
             bg_uniforms.write().unwrap().window_dims = new_dims;
             fg_uniforms.write().unwrap().window_dims = new_dims;
             rebuild_swapchain = false;
@@ -375,8 +373,8 @@ fn main() {
                 Event::Quit { .. } => break 'running,
                 Event::MouseMotion { .. } => (),
                 Event::MouseButtonDown { x, y, .. } => {
-                    let dims = game.swapchain.dimensions();
-                    let (w, h) = (dims[0], dims[1]);
+                    // number types are kind of a nightmare here
+                    let [w, h] = game.swapchain.dimensions();
                     let new_pos = (
                         (2 * x - w as i32) as f32 / w as f32,
                         (2 * y - h as i32) as f32 / h as f32,

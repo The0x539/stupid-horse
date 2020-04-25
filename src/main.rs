@@ -54,11 +54,12 @@ struct Game {
 }
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
-    let ext_names: Vec<&str> = window.vulkan_instance_extensions().unwrap();
-    let ext_strs = ext_names
+    window
+        .vulkan_instance_extensions()
+        .unwrap()
         .into_iter()
-        .map(|s| CString::new(s.as_bytes()).unwrap());
-    RawInstanceExtensions::new(ext_strs)
+        .map(|s| CString::new(s.as_bytes()).unwrap())
+        .collect()
 }
 
 fn make_viewport(w: u32, h: u32) -> Viewport {
@@ -75,19 +76,20 @@ impl Game {
         images: Vec<Arc<SwapchainImage<Fragile<Window>>>>,
         render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
     ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
-        let mut fbs: Vec<Arc<dyn FramebufferAbstract + Send + Sync>> = Vec::new();
-        for image in images {
-            let fb = Framebuffer::start(render_pass.clone())
-                .add(image.clone())
-                .unwrap()
-                .build()
-                .unwrap();
-            fbs.push(Arc::new(fb));
-        }
-        fbs
+        images
+            .into_iter()
+            .map(|image| {
+                Framebuffer::start(render_pass.clone())
+                    .add(image.clone())
+                    .unwrap()
+                    .build()
+                    .unwrap()
+            })
+            .map(|fb| Arc::new(fb) as Arc<dyn FramebufferAbstract + Send + Sync>)
+            .collect()
     }
 
-    pub fn rebuild_swapchain(&mut self) {
+    pub fn rebuild_swapchain(&mut self) -> (f32, f32) {
         let surface = self.swapchain.surface();
         let window = surface.window().get();
         let (w, h) = window.vulkan_drawable_size();
@@ -96,6 +98,8 @@ impl Game {
         self.swapchain = new_sc;
         self.framebuffers = Self::make_framebuffers(new_imgs, self.render_pass.clone());
         self.dyn_state.viewports.replace(vec![make_viewport(w, h)]);
+
+        (w as f32, h as f32)
     }
 
     pub fn new() -> Self {
@@ -113,30 +117,28 @@ impl Game {
 
         let inst = Instance::new(None, exts, None).expect("failed to create instance");
 
-        let phys_gpu = PhysicalDevice::enumerate(&inst)
-            .next()
-            .expect("no device available");
+        let (gpu, queue) = {
+            let phys_gpu = PhysicalDevice::enumerate(&inst)
+                .next()
+                .expect("no device available");
 
-        let (gpu, mut queues) = {
             let queue_family = phys_gpu
                 .queue_families()
                 .find(|&q| q.supports_graphics())
                 .expect("couldn't find a graphical queue family");
 
-            let device_ext = DeviceExtensions {
-                khr_swapchain: true,
-                ..DeviceExtensions::none()
-            };
-
-            Device::new(
+            let (dev, mut queues) = Device::new(
                 phys_gpu,
                 phys_gpu.supported_features(),
-                &device_ext,
-                [(queue_family, 0.5)].iter().cloned(),
+                &DeviceExtensions {
+                    khr_swapchain: true,
+                    ..DeviceExtensions::none()
+                },
+                std::iter::once((queue_family, 0.5)),
             )
-            .expect("failed to create device")
+            .expect("failed to create device");
+            (dev, queues.next().unwrap())
         };
-        let queue = queues.next().unwrap();
 
         let surface = unsafe {
             let raw_instance = inst.internal_object();
@@ -148,7 +150,7 @@ impl Game {
             ))
         };
 
-        let caps = surface.capabilities(phys_gpu).unwrap();
+        let caps = surface.capabilities(gpu.physical_device()).unwrap();
 
         let (swapchain, images) = Swapchain::new(
             gpu.clone(),
@@ -168,8 +170,8 @@ impl Game {
         )
         .expect("failed to create swapchain");
 
-        let render_pass = {
-            let pass = vulkano::single_pass_renderpass!(
+        let render_pass = Arc::new(
+            vulkano::single_pass_renderpass!(
                 gpu.clone(),
                 attachments: {
                     color: {
@@ -181,9 +183,8 @@ impl Game {
                 },
                 pass: {color: [color], depth_stencil: {}}
             )
-            .unwrap();
-            Arc::new(pass)
-        };
+            .unwrap(),
+        );
 
         let framebuffers = Self::make_framebuffers(images, render_pass.clone());
 
@@ -284,8 +285,6 @@ fn main() {
             .build(game.gpu.clone())
             .unwrap();
 
-        let layout = pipeline.descriptor_set_layout(0).unwrap();
-
         let [w, h] = game.swapchain.dimensions();
         let buf = CpuAccessibleBuffer::from_data(
             game.gpu.clone(),
@@ -297,6 +296,7 @@ fn main() {
         )
         .unwrap();
 
+        let layout = pipeline.descriptor_set_layout(0).unwrap();
         let desc = PersistentDescriptorSet::start(layout.clone())
             .add_buffer(buf.clone())
             .unwrap()
@@ -323,9 +323,7 @@ fn main() {
             .build(game.gpu.clone())
             .unwrap();
 
-        let layout = pipeline.descriptor_set_layout(0).unwrap();
         let [w, h] = game.swapchain.dimensions();
-
         let buf = CpuAccessibleBuffer::from_data(
             game.gpu.clone(),
             BufferUsage::all(),
@@ -339,6 +337,7 @@ fn main() {
         )
         .unwrap();
 
+        let layout = pipeline.descriptor_set_layout(0).unwrap();
         let desc = PersistentDescriptorSet::start(layout.clone())
             .add_buffer(buf.clone())
             .unwrap()
@@ -360,9 +359,7 @@ fn main() {
         // no idea where in the event loop this should actually take place
         // no idea whether this even counts as an event loop
         if rebuild_swapchain {
-            game.rebuild_swapchain();
-            let [w, h] = game.swapchain.dimensions();
-            let new_dims = (w as f32, h as f32);
+            let new_dims = game.rebuild_swapchain();
             bg_uniforms.write().unwrap().window_dims = new_dims;
             fg_uniforms.write().unwrap().window_dims = new_dims;
             rebuild_swapchain = false;
@@ -436,14 +433,8 @@ fn main() {
             .then_swapchain_present(game.queue.clone(), game.swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 
-        match future {
-            Ok(future) => {
-                prev_frame_end.replace(Box::new(future));
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        }
+        prev_frame_end.replace(Box::new(future.unwrap()));
+
         std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60));
     }
 }

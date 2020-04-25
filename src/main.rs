@@ -273,12 +273,11 @@ fn main() {
             game.gpu.clone(),
             BufferUsage::all(),
             false,
-            (
-                // beware of alignment discrepancies between GLSL and Rust
-                (0.0f32, 0.0f32),                 // click position
-                (dims[0] as f32, dims[1] as f32), // window dimensions
-                0.0f32,                           // time
-            ),
+            shaders::bg::Uniforms {
+                click_pos: (0.0f32, 0.0f32),
+                window_dims: (dims[0] as f32, dims[1] as f32),
+                time: 0.0f32,
+            },
         )
         .unwrap();
 
@@ -301,7 +300,7 @@ fn main() {
         if rebuild_swapchain {
             game.rebuild_swapchain();
             let dims = game.swapchain.dimensions();
-            uniforms.write().unwrap().1 = (dims[0] as f32, dims[1] as f32);
+            uniforms.write().unwrap().window_dims = (dims[0] as f32, dims[1] as f32);
             rebuild_swapchain = false;
         }
 
@@ -312,7 +311,7 @@ fn main() {
                 Event::MouseButtonDown { x, y, .. } => {
                     let dims = game.swapchain.dimensions();
                     let (w, h) = (dims[0], dims[1]);
-                    uniforms.write().unwrap().0 = (
+                    uniforms.write().unwrap().click_pos = (
                         (2 * x - w as i32) as f32 / w as f32,
                         (2 * y - h as i32) as f32 / h as f32,
                     );
@@ -321,7 +320,7 @@ fn main() {
             }
         }
 
-        uniforms.write().unwrap().2 += 0.1;
+        uniforms.write().unwrap().time += 0.1;
 
         let (image_num, suboptimal, acquire_future) =
             swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();

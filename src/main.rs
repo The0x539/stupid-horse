@@ -217,6 +217,45 @@ macro_rules! tris {
     }
 }
 
+macro_rules! draw_call {
+    ($game:expr, $vs:path, $fs:path, $vertex:ty, $uniforms:expr$(,)?) => {
+        {
+            let vs = $vs($game.gpu.clone()).unwrap();
+            let fs = $fs($game.gpu.clone()).unwrap();
+            let pipeline = GraphicsPipeline::start()
+                .vertex_input_single_buffer::<$vertex>()
+                .vertex_shader(vs.main_entry_point(), ())
+                .triangle_list()
+                .viewports_dynamic_scissors_irrelevant(1)
+                .fragment_shader(fs.main_entry_point(), ())
+                .render_pass(Subpass::from($game.render_pass.clone(), 0).unwrap())
+                .build($game.gpu.clone())
+                .unwrap();
+
+            let buf = CpuAccessibleBuffer::from_data(
+                $game.gpu.clone(),
+                BufferUsage::all(),
+                false,
+                $uniforms,
+            )
+            .unwrap();
+
+            let layout = pipeline.descriptor_set_layout(0).unwrap();
+            let desc = PersistentDescriptorSet::start(layout.clone())
+                .add_buffer(buf.clone())
+                .unwrap()
+                .build()
+                .unwrap();
+
+            (
+                buf,
+                Arc::new(desc),
+                Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+            )
+        }
+    };
+}
+
 fn main() {
     let mut game = Game::new();
 
@@ -272,84 +311,26 @@ fn main() {
         CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
     };
 
-    let (bg_uniforms, bg_desc, bg_pipeline) = {
-        let vs = shaders::bg::vert::Shader::load(game.gpu.clone()).unwrap();
-        let fs = shaders::bg::frag::Shader::load(game.gpu.clone()).unwrap();
-        let pipeline = GraphicsPipeline::start()
-            .vertex_input_single_buffer::<Vertex>()
-            .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
-            .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from(game.render_pass.clone(), 0).unwrap())
-            .build(game.gpu.clone())
-            .unwrap();
-
-        let [w, h] = game.swapchain.dimensions();
-        let buf = CpuAccessibleBuffer::from_data(
-            game.gpu.clone(),
-            BufferUsage::all(),
-            false,
-            shaders::bg::Uniforms {
-                window_dims: (w as f32, h as f32),
-            },
-        )
-        .unwrap();
-
-        let layout = pipeline.descriptor_set_layout(0).unwrap();
-        let desc = PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(buf.clone())
-            .unwrap()
-            .build()
-            .unwrap();
-
-        (
-            buf,
-            Arc::new(desc),
-            Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-        )
-    };
-
-    let (fg_uniforms, fg_desc, fg_pipeline) = {
-        let vs = shaders::fg::vert::Shader::load(game.gpu.clone()).unwrap();
-        let fs = shaders::fg::frag::Shader::load(game.gpu.clone()).unwrap();
-        let pipeline = GraphicsPipeline::start()
-            .vertex_input_single_buffer::<Vertex>()
-            .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
-            .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from(game.render_pass.clone(), 0).unwrap())
-            .build(game.gpu.clone())
-            .unwrap();
-
-        let [w, h] = game.swapchain.dimensions();
-        let buf = CpuAccessibleBuffer::from_data(
-            game.gpu.clone(),
-            BufferUsage::all(),
-            false,
-            shaders::fg::Uniforms {
-                click_pos: (0.0f32, 0.0f32),
-                window_dims: (w as f32, h as f32),
-                time: 0.0f32,
-                scale: 0.5f32,
-            },
-        )
-        .unwrap();
-
-        let layout = pipeline.descriptor_set_layout(0).unwrap();
-        let desc = PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(buf.clone())
-            .unwrap()
-            .build()
-            .unwrap();
-
-        (
-            buf,
-            Arc::new(desc),
-            Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-        )
-    };
+    let [w, h] = game.swapchain.dimensions();
+    let (bg_uniforms, bg_desc, bg_pipeline) = draw_call!(
+        game,
+        shaders::bg::vert::Shader::load,
+        shaders::bg::frag::Shader::load,
+        Vertex,
+        shaders::bg::Uniforms { window_dims: (w as f32, h as f32) },
+    );
+    let (fg_uniforms, fg_desc, fg_pipeline) = draw_call!(
+        game,
+        shaders::fg::vert::Shader::load,
+        shaders::fg::frag::Shader::load,
+        Vertex,
+        shaders::fg::Uniforms {
+            click_pos: (0.0f32, 0.0f32),
+            window_dims: (w as f32, h as f32),
+            time: 0.0f32,
+            scale: 0.5f32,
+        },
+    );
 
     let mut rebuild_swapchain = false;
 

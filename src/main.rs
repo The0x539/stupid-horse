@@ -361,8 +361,15 @@ fn main() {
 
         time += 0.1;
 
-        let (image_num, suboptimal, acquire_future) =
-            swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();
+        let res = swapchain::acquire_next_image(game.swapchain.clone(), None);
+        let (image_num, suboptimal, acquire_future) = match res {
+            Ok(r) => r,
+            Err(swapchain::AcquireError::OutOfDate) => {
+                rebuild_swapchain = true;
+                continue;
+            }
+            Err(e) => panic!(e),
+        };
 
         if suboptimal {
             rebuild_swapchain = true;

@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::sync::Arc;
-
+use fragile::Fragile;
+use sdl2::{event::Event, video::Window, Sdl};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer},
     command_buffer::{AutoCommandBufferBuilder, DynamicState},
@@ -10,15 +11,14 @@ use vulkano::{
     framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
     image::SwapchainImage,
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
-    pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract},
+    pipeline::{
+        vertex::Vertex as VertexAbstract, viewport::Viewport, GraphicsPipeline,
+        GraphicsPipelineAbstract,
+    },
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
     sync::{self, GpuFuture},
     VulkanObject,
 };
-
-use sdl2::{event::Event, video::Window, Sdl};
-
-use fragile::Fragile;
 
 mod shaders;
 use shaders::{
@@ -112,12 +112,9 @@ impl Game {
         self.dyn_state.viewports.as_mut().unwrap()[0] = Self::make_viewport([w, h]);
     }
 
-    pub fn make_pipeline<Vs, Fs, V>(&self) -> Arc<impl GraphicsPipelineAbstract>
-    where
-        Vs: ShaderAbstract,
-        Fs: ShaderAbstract,
-        V: vulkano::pipeline::vertex::Vertex,
-    {
+    pub fn make_pipeline<Vs: ShaderAbstract, Fs: ShaderAbstract, V: VertexAbstract>(
+        &self,
+    ) -> Arc<impl GraphicsPipelineAbstract> {
         let vs = <Vs>::load(self.gpu.clone()).unwrap();
         let fs = <Fs>::load(self.gpu.clone()).unwrap();
         let pipeline = GraphicsPipeline::start()
@@ -133,15 +130,12 @@ impl Game {
         Arc::new(pipeline)
     }
 
-    pub fn make_uniforms<U>(
+    pub fn make_uniforms<U: Send + Sync + 'static>(
         &self,
         pipeline: impl GraphicsPipelineAbstract,
         idx: usize,
         uniforms: U,
-    ) -> (Arc<CpuAccessibleBuffer<U>>, Arc<impl DescriptorSet>)
-    where
-        U: Send + Sync + 'static,
-    {
+    ) -> (Arc<CpuAccessibleBuffer<U>>, Arc<impl DescriptorSet>) {
         let buf =
             CpuAccessibleBuffer::from_data(self.gpu.clone(), BufferUsage::all(), false, uniforms)
                 .unwrap();
@@ -157,19 +151,22 @@ impl Game {
         (buf, Arc::new(desc))
     }
 
-    pub fn make_immutable_buffer<T: Send + Sync + 'static>(&mut self, verts: T) -> Arc<ImmutableBuffer<T>> {
-        let (buf, fut) = ImmutableBuffer::from_data(verts, BufferUsage::all(), self.queue.clone()).unwrap();
-        self.future = self.future
+    pub fn make_immutable_buffer<T: Send + Sync + 'static>(
+        &mut self,
+        verts: T,
+    ) -> Arc<ImmutableBuffer<T>> {
+        let (buf, fut) =
+            ImmutableBuffer::from_data(verts, BufferUsage::all(), self.queue.clone()).unwrap();
+        self.future = self
+            .future
             .take()
             .map(|x| Box::new(x.join(fut)) as Box<dyn GpuFuture>);
         buf
     }
 
-
     pub fn new() -> Self {
         let sdl = sdl2::init().unwrap();
         let video_subsystem = sdl.video().unwrap();
-
         let window = video_subsystem
             .window("stupid horse", WIN_WIDTH, WIN_HEIGHT)
             .resizable()
@@ -178,7 +175,6 @@ impl Game {
             .unwrap();
 
         let exts = required_extensions(&window);
-
         let inst = Instance::new(None, exts, None).expect("failed to create instance");
 
         let (gpu, queue) = {
@@ -215,7 +211,6 @@ impl Game {
         };
 
         let caps = surface.capabilities(gpu.physical_device()).unwrap();
-
         let (swapchain, images) = Swapchain::new(
             gpu.clone(),
             surface.clone(),
@@ -260,14 +255,14 @@ impl Game {
         let future = Some(Box::new(sync::now(gpu.clone())) as Box<dyn GpuFuture>);
 
         Self {
-            sdl: sdl,
-            gpu: gpu,
-            queue: queue,
-            swapchain: swapchain,
-            framebuffers: framebuffers,
-            dyn_state: dyn_state,
-            render_pass: render_pass,
-            future: future,
+            sdl,
+            gpu,
+            queue,
+            swapchain,
+            framebuffers,
+            dyn_state,
+            render_pass,
+            future,
         }
     }
 }
@@ -420,7 +415,8 @@ fn main() {
         .build()
         .unwrap();
 
-        let future = game.future
+        let future = game
+            .future
             .take()
             .unwrap()
             .join(acquire_future)

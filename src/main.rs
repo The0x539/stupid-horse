@@ -111,7 +111,7 @@ impl Game {
         self.dyn_state.viewports.as_mut().unwrap()[0] = Self::make_viewport([w, h]);
     }
 
-    pub fn make_pipeline<Vs, Fs, V>(&self) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync>
+    pub fn make_pipeline<Vs, Fs, V>(&self) -> Arc<impl GraphicsPipelineAbstract>
     where
         Vs: ShaderAbstract,
         Fs: ShaderAbstract,
@@ -129,7 +129,7 @@ impl Game {
             .build(self.gpu.clone())
             .unwrap();
 
-        Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>
+        Arc::new(pipeline)
     }
 
     pub fn make_uniforms<U>(
@@ -178,7 +178,7 @@ impl Game {
 
             let queue_family = phys_gpu
                 .queue_families()
-                .find(|&q| q.supports_graphics())
+                .find(|q| q.supports_graphics())
                 .expect("couldn't find a graphical queue family");
 
             let (dev, mut queues) = Device::new(
@@ -242,7 +242,6 @@ impl Game {
 
         let framebuffers = Self::make_framebuffers(images, render_pass.clone());
 
-        // No longer treating the DIMS const as authoritative
         let dyn_state = DynamicState {
             viewports: Some(vec![Self::make_viewport(swapchain.dimensions())]),
             ..Default::default()
@@ -369,7 +368,7 @@ fn main() {
                     fg_uniforms.write().unwrap().click_pos = new_pos;
                 }
                 Event::MouseWheel { y, .. } => {
-                    fg_uniforms.write().unwrap().scale *= f32::powi(0.9, -y);
+                    fg_uniforms.write().unwrap().scale *= f32::powi(1.1, y);
                 }
                 _ => println!("{:?}", event),
             }

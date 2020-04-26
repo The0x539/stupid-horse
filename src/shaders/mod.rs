@@ -65,5 +65,5 @@ pub(crate) mod fg {
     }
 
     #[repr(C)]
-    pub(crate) struct Uniforms((f32, f32), f32, f32);
+    pub(crate) struct Uniforms(pub (f32, f32), pub f32, pub f32);
 }

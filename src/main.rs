@@ -4,9 +4,7 @@ use std::sync::Arc;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer},
     command_buffer::{AutoCommandBufferBuilder, DynamicState},
-    descriptor::{
-        descriptor_set::PersistentDescriptorSet, pipeline_layout::PipelineLayoutAbstract,
-    },
+    descriptor::{descriptor_set::PersistentDescriptorSet, DescriptorSet},
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
     framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
@@ -23,6 +21,11 @@ use sdl2::{event::Event, video::Window, Sdl};
 use fragile::Fragile;
 
 mod shaders;
+use shaders::{
+    bg::{frag::Shader as bg_fs, vert::Shader as bg_vs},
+    fg::{frag::Shader as fg_fs, vert::Shader as fg_vs},
+    ShaderAbstract,
+};
 
 static WIN_WIDTH: u32 = 540;
 static WIN_HEIGHT: u32 = 540;
@@ -106,6 +109,51 @@ impl Game {
         self.swapchain = new_sc;
         self.framebuffers = Self::make_framebuffers(new_imgs, self.render_pass.clone());
         self.dyn_state.viewports.as_mut().unwrap()[0] = Self::make_viewport([w, h]);
+    }
+
+    pub fn make_pipeline<Vs, Fs, V>(&self) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync>
+    where
+        Vs: ShaderAbstract,
+        Fs: ShaderAbstract,
+        V: vulkano::pipeline::vertex::Vertex,
+    {
+        let vs = <Vs>::load(self.gpu.clone()).unwrap();
+        let fs = <Fs>::load(self.gpu.clone()).unwrap();
+        let pipeline = GraphicsPipeline::start()
+            .vertex_input_single_buffer::<V>()
+            .vertex_shader(vs.main_entry_point(), ())
+            .triangle_list()
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from(self.render_pass.clone(), 0).unwrap())
+            .build(self.gpu.clone())
+            .unwrap();
+
+        Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>
+    }
+
+    pub fn make_uniforms<U>(
+        &self,
+        pipeline: impl GraphicsPipelineAbstract,
+        idx: usize,
+        uniforms: U,
+    ) -> (Arc<CpuAccessibleBuffer<U>>, Arc<impl DescriptorSet>)
+    where
+        U: Send + Sync + 'static,
+    {
+        let buf =
+            CpuAccessibleBuffer::from_data(self.gpu.clone(), BufferUsage::all(), false, uniforms)
+                .unwrap();
+
+        let layout = pipeline.descriptor_set_layout(idx).unwrap();
+
+        let desc = PersistentDescriptorSet::start(layout.clone())
+            .add_buffer(buf.clone())
+            .unwrap()
+            .build()
+            .unwrap();
+
+        (buf, Arc::new(desc))
     }
 
     pub fn new() -> Self {
@@ -222,42 +270,6 @@ macro_rules! tris {
     }
 }
 
-// Probably shouldn't be a macro
-macro_rules! draw_call {
-    ($game:expr, $vs:path, $fs:path, $vertex:ty, $uniforms:expr$(,)?) => {{
-        let pipeline = draw_call!($game, $vs, $fs, $vertex);
-        let buf =
-            CpuAccessibleBuffer::from_data($game.gpu.clone(), BufferUsage::all(), false, $uniforms)
-                .unwrap();
-
-        let layout = pipeline.descriptor_set_layout(0).unwrap();
-
-        let desc = PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(buf.clone())
-            .unwrap()
-            .build()
-            .unwrap();
-
-        (buf, Arc::new(desc), pipeline)
-    }};
-
-    ($game:expr, $vs:ty, $fs:ty, $vertex:ty$(,)?) => {{
-        let vs = <$vs>::load($game.gpu.clone()).unwrap();
-        let fs = <$fs>::load($game.gpu.clone()).unwrap();
-        let pipeline = GraphicsPipeline::start()
-            .vertex_input_single_buffer::<$vertex>()
-            .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
-            .fragment_shader(fs.main_entry_point(), ())
-            .render_pass(Subpass::from($game.render_pass.clone(), 0).unwrap())
-            .build($game.gpu.clone())
-            .unwrap();
-
-        Arc::new(pipeline) as Arc<dyn GraphicsPipelineAbstract + Send + Sync>
-    }};
-}
-
 fn main() {
     let mut game = Game::new();
 
@@ -313,17 +325,12 @@ fn main() {
         CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
     };
 
-    let bg_pipeline = draw_call!(
-        game,
-        shaders::bg::vert::Shader,
-        shaders::bg::frag::Shader,
-        Vertex,
-    );
-    let (fg_uniforms, fg_desc, fg_pipeline) = draw_call!(
-        game,
-        shaders::fg::vert::Shader,
-        shaders::fg::frag::Shader,
-        Vertex,
+    let bg_pipeline = game.make_pipeline::<bg_vs, bg_fs, Vertex>();
+    let fg_pipeline = game.make_pipeline::<fg_vs, fg_fs, Vertex>();
+
+    let (fg_uniforms, fg_desc) = game.make_uniforms(
+        fg_pipeline.clone(),
+        0,
         shaders::fg::Uniforms {
             click_pos: (0.0f32, 0.0f32),
             time: 0.0f32,

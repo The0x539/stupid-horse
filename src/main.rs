@@ -2,7 +2,7 @@ use std::ffi::CString;
 use std::sync::Arc;
 
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer},
+    buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer},
     command_buffer::{AutoCommandBufferBuilder, DynamicState},
     descriptor::{descriptor_set::PersistentDescriptorSet, DescriptorSet},
     device::{Device, DeviceExtensions, Queue},
@@ -56,6 +56,7 @@ struct Game {
     framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
     dyn_state: DynamicState,
     render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+    future: Option<Box<dyn GpuFuture>>,
 }
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
@@ -156,6 +157,15 @@ impl Game {
         (buf, Arc::new(desc))
     }
 
+    pub fn make_immutable_buffer<T: Send + Sync + 'static>(&mut self, verts: T) -> Arc<ImmutableBuffer<T>> {
+        let (buf, fut) = ImmutableBuffer::from_data(verts, BufferUsage::all(), self.queue.clone()).unwrap();
+        self.future = self.future
+            .take()
+            .map(|x| Box::new(x.join(fut)) as Box<dyn GpuFuture>);
+        buf
+    }
+
+
     pub fn new() -> Self {
         let sdl = sdl2::init().unwrap();
         let video_subsystem = sdl.video().unwrap();
@@ -247,6 +257,8 @@ impl Game {
             ..Default::default()
         };
 
+        let future = Some(Box::new(sync::now(gpu.clone())) as Box<dyn GpuFuture>);
+
         Self {
             sdl: sdl,
             gpu: gpu,
@@ -255,6 +267,7 @@ impl Game {
             framebuffers: framebuffers,
             dyn_state: dyn_state,
             render_pass: render_pass,
+            future: future,
         }
     }
 }
@@ -272,8 +285,6 @@ macro_rules! tris {
 fn main() {
     let mut game = Game::new();
 
-    let mut prev_frame_end = Some(Box::new(sync::now(game.gpu.clone())) as Box<dyn GpuFuture>);
-
     let mut event_pump = game.sdl.event_pump().unwrap();
 
     let bg_verts = {
@@ -289,15 +300,13 @@ fn main() {
         let gray3 = [0.75, 0.75, 0.75];
         let white = [1.0, 1.0, 1.0];
 
-        let verts = tris![
+        game.make_immutable_buffer(tris![
             (topleft, topright, center, black),
             (topright, bottomright, center, gray1),
             (bottomright, bottomleft, center, gray2),
             (bottomleft, topleft, center, gray3),
             ([-0.125, -0.125], [0.125, -0.125], [0.0, 0.125], white),
-        ];
-
-        CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
+        ])
     };
 
     let fg_verts = {
@@ -315,13 +324,11 @@ fn main() {
             [-f32::sqrt(3.0) / 4.0, 0.25],
         );
 
-        let verts = tris![
+        game.make_immutable_buffer(tris![
             (p.0, p.1, p.5, red),
             (p.1, p.2, p.3, green),
             (p.5, p.3, p.4, blue),
-        ];
-
-        CpuAccessibleBuffer::from_data(game.gpu.clone(), BufferUsage::all(), false, verts).unwrap()
+        ])
     };
 
     let bg_pipeline = game.make_pipeline::<bg_vs, bg_fs, Vertex>();
@@ -340,7 +347,7 @@ fn main() {
     let mut rebuild_swapchain = false;
 
     'running: loop {
-        prev_frame_end.as_mut().unwrap().cleanup_finished();
+        game.future.as_mut().unwrap().cleanup_finished();
 
         // no idea where in the event loop this should actually take place
         // no idea whether this even counts as an event loop
@@ -413,7 +420,7 @@ fn main() {
         .build()
         .unwrap();
 
-        let future = prev_frame_end
+        let future = game.future
             .take()
             .unwrap()
             .join(acquire_future)
@@ -422,7 +429,7 @@ fn main() {
             .then_swapchain_present(game.queue.clone(), game.swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 
-        prev_frame_end.replace(Box::new(future.unwrap()));
+        game.future.replace(Box::new(future.unwrap()));
 
         std::thread::sleep(std::time::Duration::new(0, 1_000_000_000u32 / 60));
     }

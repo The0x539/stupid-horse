@@ -63,9 +63,6 @@ pub(crate) mod fg {
             path: "src/shaders/fg.frag"
         }
     }
-
-    #[repr(C)]
-    pub(crate) struct Uniforms(pub (f32, f32), pub f32, pub f32);
 }
 
 pub(crate) mod horse {
@@ -82,7 +79,12 @@ pub(crate) mod horse {
             path: "src/shaders/horse.frag"
         }
     }
+}
 
-    #[repr(C)]
-    pub(crate) struct Uniforms(pub (f32, f32), pub f32, pub f32);
+#[derive(Copy, Clone)]
+#[repr(C)]
+pub(crate) struct Uniforms {
+    pub click_pos: (f32, f32),
+    pub time: f32,
+    pub scale: f32,
 }

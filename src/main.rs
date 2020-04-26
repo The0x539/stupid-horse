@@ -359,9 +359,11 @@ fn main() {
     let fg_pipeline = game.make_pipeline::<fg_vs, fg_fs, ColorVertex>();
     let horse_pipeline = game.make_pipeline::<horse_vs, horse_fs, TextureVertex>();
 
-    let mut click_pos = (0.0f32, 0.0f32);
-    let mut time = 0.0f32;
-    let mut scale = 0.5f32;
+    let mut uniforms = shaders::Uniforms {
+        click_pos: (0.0f32, 0.0f32),
+        time: 0.0f32,
+        scale: 0.5f32,
+    };
 
     let (fg_buf_pool, mut fg_desc_pool) = game.make_uniforms(fg_pipeline.clone(), 0);
     let (horse_buf_pool, mut horse_desc_pool) = game.make_uniforms(horse_pipeline.clone(), 0);
@@ -423,18 +425,17 @@ fn main() {
                         dimensions: [vp_w, vp_h],
                         ..
                     } = game.get_viewport();
-
-                    click_pos.0 = (x as f32 - vp_x) * 2.0 / vp_w - 1.0;
-                    click_pos.1 = (y as f32 - vp_y) * 2.0 / vp_h - 1.0;
+                    uniforms.click_pos = (
+                        (x as f32 - vp_x) * 2.0 / vp_w - 1.0,
+                        (y as f32 - vp_y) * 2.0 / vp_h - 1.0,
+                    );
                 }
-                Event::MouseWheel { y, .. } => {
-                    scale *= f32::powi(1.1, y);
-                }
+                Event::MouseWheel { y, .. } => uniforms.scale *= f32::powi(1.1, y),
                 _ => println!("{:?}", event),
             }
         }
 
-        time += 0.1;
+        uniforms.time += 0.1;
 
         let res = swapchain::acquire_next_image(game.swapchain.clone(), None);
         let (image_num, suboptimal, acquire_future) = match res {
@@ -453,7 +454,6 @@ fn main() {
         let fb = game.framebuffers[image_num].clone();
 
         let triforce_desc = {
-            let uniforms = shaders::fg::Uniforms(click_pos, time, scale);
             let buf = fg_buf_pool.next(uniforms).unwrap();
             fg_desc_pool
                 .get_mut()
@@ -466,7 +466,6 @@ fn main() {
         };
 
         let horse_desc = {
-            let uniforms = shaders::horse::Uniforms(click_pos, time, scale);
             let buf = horse_buf_pool.next(uniforms).unwrap();
             horse_desc_pool
                 .get_mut()

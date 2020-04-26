@@ -1,11 +1,11 @@
-use std::ffi::CString;
-use std::sync::Arc;
 use fragile::Fragile;
 use sdl2::{event::Event, video::Window, Sdl};
+use std::ffi::CString;
+use std::sync::{Arc, Mutex};
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, ImmutableBuffer},
+    buffer::{BufferUsage, CpuBufferPool, ImmutableBuffer},
     command_buffer::{AutoCommandBufferBuilder, DynamicState},
-    descriptor::{descriptor_set::PersistentDescriptorSet, DescriptorSet},
+    descriptor::descriptor_set::FixedSizeDescriptorSetsPool,
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
     framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
@@ -130,25 +130,15 @@ impl Game {
         Arc::new(pipeline)
     }
 
-    pub fn make_uniforms<U: Send + Sync + 'static>(
+    pub fn make_uniforms<T>(
         &self,
         pipeline: impl GraphicsPipelineAbstract,
         idx: usize,
-        uniforms: U,
-    ) -> (Arc<CpuAccessibleBuffer<U>>, Arc<impl DescriptorSet>) {
-        let buf =
-            CpuAccessibleBuffer::from_data(self.gpu.clone(), BufferUsage::all(), false, uniforms)
-                .unwrap();
-
+    ) -> (CpuBufferPool<T>, Mutex<FixedSizeDescriptorSetsPool>) {
         let layout = pipeline.descriptor_set_layout(idx).unwrap();
-
-        let desc = PersistentDescriptorSet::start(layout.clone())
-            .add_buffer(buf.clone())
-            .unwrap()
-            .build()
-            .unwrap();
-
-        (buf, Arc::new(desc))
+        let buf_pool = CpuBufferPool::uniform_buffer(self.gpu.clone());
+        let desc_pool = FixedSizeDescriptorSetsPool::new(layout.clone());
+        (buf_pool, Mutex::new(desc_pool))
     }
 
     pub fn make_immutable_buffer<T: Send + Sync + 'static>(
@@ -329,15 +319,11 @@ fn main() {
     let bg_pipeline = game.make_pipeline::<bg_vs, bg_fs, Vertex>();
     let fg_pipeline = game.make_pipeline::<fg_vs, fg_fs, Vertex>();
 
-    let (fg_uniforms, fg_desc) = game.make_uniforms(
-        fg_pipeline.clone(),
-        0,
-        shaders::fg::Uniforms {
-            click_pos: (0.0f32, 0.0f32),
-            time: 0.0f32,
-            scale: 0.5f32,
-        },
-    );
+    let mut click_pos = (0.0f32, 0.0f32);
+    let mut time = 0.0f32;
+    let mut scale = 0.5f32;
+
+    let (fg_buf_pool, mut fg_desc_pool) = game.make_uniforms(fg_pipeline.clone(), 0);
 
     let mut rebuild_swapchain = false;
 
@@ -362,21 +348,17 @@ fn main() {
                         ..
                     } = game.get_viewport();
 
-                    let new_pos = (
-                        (x as f32 - vp_x) * 2.0 / vp_w - 1.0,
-                        (y as f32 - vp_y) * 2.0 / vp_h - 1.0,
-                    );
-
-                    fg_uniforms.write().unwrap().click_pos = new_pos;
+                    click_pos.0 = (x as f32 - vp_x) * 2.0 / vp_w - 1.0;
+                    click_pos.1 = (y as f32 - vp_y) * 2.0 / vp_h - 1.0;
                 }
                 Event::MouseWheel { y, .. } => {
-                    fg_uniforms.write().unwrap().scale *= f32::powi(1.1, y);
+                    scale *= f32::powi(1.1, y);
                 }
                 _ => println!("{:?}", event),
             }
         }
 
-        fg_uniforms.write().unwrap().time += 0.1;
+        time += 0.1;
 
         let (image_num, suboptimal, acquire_future) =
             swapchain::acquire_next_image(game.swapchain.clone(), None).unwrap();
@@ -386,6 +368,21 @@ fn main() {
         }
 
         let fb = game.framebuffers[image_num].clone();
+
+        let uniforms = shaders::fg::Uniforms {
+            click_pos,
+            time,
+            scale,
+        };
+        let buf = fg_buf_pool.next(uniforms).unwrap();
+        let desc = fg_desc_pool
+            .get_mut()
+            .unwrap()
+            .next()
+            .add_buffer(buf)
+            .unwrap()
+            .build()
+            .unwrap();
 
         let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(
             game.gpu.clone(),
@@ -406,7 +403,7 @@ fn main() {
             fg_pipeline.clone(),
             &game.dyn_state,
             vec![fg_verts.clone()],
-            fg_desc.clone(),
+            desc,
             (),
         )
         .expect("fg draw call failed")

@@ -397,7 +397,7 @@ fn main() {
             game.queue.family(),
         )
         .unwrap()
-        .begin_render_pass(fb, false, vec![ClearValue::Float([0.0, 0.0, 1.0, 1.0])])
+        .begin_render_pass(fb, false, vec![ClearValue::Float([0.105, 0.625, 0.0, 1.0])])
         .unwrap()
         .draw(
             bg_pipeline.clone(),

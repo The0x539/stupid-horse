@@ -67,3 +67,22 @@ pub(crate) mod fg {
     #[repr(C)]
     pub(crate) struct Uniforms(pub (f32, f32), pub f32, pub f32);
 }
+
+pub(crate) mod horse {
+    pub(crate) mod vert {
+        shader! {
+            ty: "vertex",
+            path: "src/shaders/horse.vert"
+        }
+    }
+
+    pub(crate) mod frag {
+        shader! {
+            ty: "fragment",
+            path: "src/shaders/horse.frag"
+        }
+    }
+
+    #[repr(C)]
+    pub(crate) struct Uniforms(pub (f32, f32), pub f32, pub f32);
+}

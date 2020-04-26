@@ -1,8 +1,12 @@
 fn main() {
     for shader in [
-        "vertex",
-        "fragment",
+        "bg.vert",
+        "bg.frag",
+        "fg.vert",
+        "fg.frag",
+        "horse.vert",
+        "horse.frag",
     ].iter() {
-        println!("cargo:rerun-if-changed=src/shaders/{}.glsl", shader);
+        println!("cargo:rerun-if-changed=src/shaders/{}", shader);
     }
 }

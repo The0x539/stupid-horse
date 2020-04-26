@@ -1,4 +1,5 @@
 use fragile::Fragile;
+use image;
 use sdl2::{event::Event, video::Window, Sdl};
 use std::ffi::CString;
 use std::sync::{Arc, Mutex};
@@ -9,12 +10,13 @@ use vulkano::{
     device::{Device, DeviceExtensions, Queue},
     format::ClearValue,
     framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
-    image::SwapchainImage,
+    image::{self as vk_img, ImmutableImage, SwapchainImage},
     instance::{Instance, PhysicalDevice, RawInstanceExtensions},
     pipeline::{
         vertex::Vertex as VertexAbstract, viewport::Viewport, GraphicsPipeline,
         GraphicsPipelineAbstract,
     },
+    sampler::{Filter, MipmapMode, Sampler, SamplerAddressMode},
     swapchain::{self, FullscreenExclusive, PresentMode, Surface, SurfaceTransform, Swapchain},
     sync::{self, GpuFuture},
     VulkanObject,
@@ -24,6 +26,7 @@ mod shaders;
 use shaders::{
     bg::{frag::Shader as bg_fs, vert::Shader as bg_vs},
     fg::{frag::Shader as fg_fs, vert::Shader as fg_vs},
+    horse::{frag::Shader as horse_fs, vert::Shader as horse_vs},
     ShaderAbstract,
 };
 
@@ -32,21 +35,38 @@ static WIN_HEIGHT: u32 = 540;
 static ASPECT_RATIO: f32 = WIN_WIDTH as f32 / WIN_HEIGHT as f32;
 
 #[derive(Default, Copy, Clone)]
-struct Vertex {
+struct ColorVertex {
     a_position: [f32; 2],
     a_color: [f32; 3],
 }
 
-impl Vertex {
+impl ColorVertex {
     pub fn new(xy: [f32; 2], rgb: [f32; 3]) -> Self {
-        Vertex {
+        ColorVertex {
             a_position: xy,
             a_color: rgb,
         }
     }
 }
 
-vulkano::impl_vertex!(Vertex, a_position, a_color);
+vulkano::impl_vertex!(ColorVertex, a_position, a_color);
+
+#[derive(Default, Copy, Clone)]
+struct TextureVertex {
+    a_position: [f32; 2],
+    a_coords: [f32; 2],
+}
+
+impl TextureVertex {
+    pub fn new(xy: [f32; 2], uv: [f32; 2]) -> Self {
+        TextureVertex {
+            a_position: xy,
+            a_coords: uv,
+        }
+    }
+}
+
+vulkano::impl_vertex!(TextureVertex, a_position, a_coords);
 
 struct Game {
     sdl: Sdl,
@@ -122,6 +142,7 @@ impl Game {
             .vertex_shader(vs.main_entry_point(), ())
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
+            .blend_alpha_blending() // TODO: more customization
             .fragment_shader(fs.main_entry_point(), ())
             .render_pass(Subpass::from(self.render_pass.clone(), 0).unwrap())
             .build(self.gpu.clone())
@@ -147,11 +168,16 @@ impl Game {
     ) -> Arc<ImmutableBuffer<T>> {
         let (buf, fut) =
             ImmutableBuffer::from_data(verts, BufferUsage::all(), self.queue.clone()).unwrap();
-        self.future = self
-            .future
-            .take()
-            .map(|x| Box::new(x.join(fut)) as Box<dyn GpuFuture>);
+        self.join_future(fut);
         buf
+    }
+
+    pub fn join_future(&mut self, fut: impl GpuFuture + 'static) {
+        let new_future: Box<dyn GpuFuture> = match self.future.take() {
+            Some(f) => Box::new(f.join(fut)),
+            None => Box::new(fut),
+        };
+        self.future = Some(new_future);
     }
 
     pub fn new() -> Self {
@@ -201,6 +227,7 @@ impl Game {
         };
 
         let caps = surface.capabilities(gpu.physical_device()).unwrap();
+
         let (swapchain, images) = Swapchain::new(
             gpu.clone(),
             surface.clone(),
@@ -218,6 +245,8 @@ impl Game {
             caps.supported_formats[0].1,
         )
         .expect("failed to create swapchain");
+
+        dbg!(swapchain.format());
 
         let render_pass = Arc::new(
             vulkano::single_pass_renderpass!(
@@ -260,9 +289,9 @@ impl Game {
 macro_rules! tris {
     ($(($v1:expr, $v2:expr, $v3:expr, $c:expr)),*$(,)*) => {
         [$(
-            Vertex::new($v1, $c),
-            Vertex::new($v2, $c),
-            Vertex::new($v3, $c)
+            ColorVertex::new($v1, $c),
+            ColorVertex::new($v2, $c),
+            ColorVertex::new($v3, $c)
         ),*]
     }
 }
@@ -290,7 +319,7 @@ fn main() {
             (topright, bottomright, center, gray1),
             (bottomright, bottomleft, center, gray2),
             (bottomleft, topleft, center, gray3),
-            ([0.0,  0.125], [-0.125, 0.0], [0.125, 0.0], white),
+            ([0.0, 0.125], [-0.125, 0.0], [0.125, 0.0], white),
             ([0.0, -0.125], [-0.125, 0.0], [0.125, 0.0], white),
         ])
     };
@@ -317,14 +346,60 @@ fn main() {
         ])
     };
 
-    let bg_pipeline = game.make_pipeline::<bg_vs, bg_fs, Vertex>();
-    let fg_pipeline = game.make_pipeline::<fg_vs, fg_fs, Vertex>();
+    let horse_verts = game.make_immutable_buffer([
+        TextureVertex::new([-0.2, -0.2], [0.0, 0.0]),
+        TextureVertex::new([0.2, -0.2], [1.0, 0.0]),
+        TextureVertex::new([0.2, 0.2], [1.0, 1.0]),
+        TextureVertex::new([-0.2, -0.2], [0.0, 0.0]),
+        TextureVertex::new([-0.2, 0.2], [0.0, 1.0]),
+        TextureVertex::new([0.2, 0.2], [1.0, 1.0]),
+    ]);
+
+    let bg_pipeline = game.make_pipeline::<bg_vs, bg_fs, ColorVertex>();
+    let fg_pipeline = game.make_pipeline::<fg_vs, fg_fs, ColorVertex>();
+    let horse_pipeline = game.make_pipeline::<horse_vs, horse_fs, TextureVertex>();
 
     let mut click_pos = (0.0f32, 0.0f32);
     let mut time = 0.0f32;
     let mut scale = 0.5f32;
 
     let (fg_buf_pool, mut fg_desc_pool) = game.make_uniforms(fg_pipeline.clone(), 0);
+    let (horse_buf_pool, mut horse_desc_pool) = game.make_uniforms(horse_pipeline.clone(), 0);
+
+    let horse_img = {
+        let img = match image::open("horse.png").unwrap() {
+            image::DynamicImage::ImageRgba8(i) => i,
+            x => panic!(x),
+        };
+
+        let (width, height) = img.dimensions();
+        let dims = vk_img::Dimensions::Dim2d { width, height };
+
+        let pixels = img
+            .enumerate_pixels()
+            .map(|(_x, _y, &image::Rgba(rgba))| rgba);
+
+        let (tex, fut) =
+            ImmutableImage::from_iter(pixels, dims, game.swapchain.format(), game.queue.clone())
+                .unwrap();
+        game.join_future(fut);
+        tex
+    };
+
+    let horse_sampler = Sampler::new(
+        game.gpu.clone(),
+        Filter::Linear,
+        Filter::Linear,
+        MipmapMode::Nearest,
+        SamplerAddressMode::Repeat,
+        SamplerAddressMode::Repeat,
+        SamplerAddressMode::Repeat,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+    )
+    .unwrap();
 
     let mut rebuild_swapchain = false;
 
@@ -377,16 +452,33 @@ fn main() {
 
         let fb = game.framebuffers[image_num].clone();
 
-        let uniforms = shaders::fg::Uniforms(click_pos, time, scale);
-        let buf = fg_buf_pool.next(uniforms).unwrap();
-        let desc = fg_desc_pool
-            .get_mut()
-            .unwrap()
-            .next()
-            .add_buffer(buf)
-            .unwrap()
-            .build()
-            .unwrap();
+        let triforce_desc = {
+            let uniforms = shaders::fg::Uniforms(click_pos, time, scale);
+            let buf = fg_buf_pool.next(uniforms).unwrap();
+            fg_desc_pool
+                .get_mut()
+                .unwrap()
+                .next()
+                .add_buffer(buf)
+                .unwrap()
+                .build()
+                .unwrap()
+        };
+
+        let horse_desc = {
+            let uniforms = shaders::horse::Uniforms(click_pos, time, scale);
+            let buf = horse_buf_pool.next(uniforms).unwrap();
+            horse_desc_pool
+                .get_mut()
+                .unwrap()
+                .next()
+                .add_buffer(buf)
+                .unwrap()
+                .add_sampled_image(horse_img.clone(), horse_sampler.clone())
+                .unwrap()
+                .build()
+                .unwrap()
+        };
 
         let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(
             game.gpu.clone(),
@@ -407,10 +499,18 @@ fn main() {
             fg_pipeline.clone(),
             &game.dyn_state,
             vec![fg_verts.clone()],
-            desc,
+            triforce_desc,
             (),
         )
         .expect("fg draw call failed")
+        .draw(
+            horse_pipeline.clone(),
+            &game.dyn_state,
+            vec![horse_verts.clone()],
+            horse_desc,
+            (),
+        )
+        .expect("horse draw call failed")
         .end_render_pass()
         .unwrap()
         .build()

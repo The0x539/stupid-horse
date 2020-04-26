@@ -377,11 +377,7 @@ fn main() {
 
         let fb = game.framebuffers[image_num].clone();
 
-        let uniforms = shaders::fg::Uniforms {
-            click_pos,
-            time,
-            scale,
-        };
+        let uniforms = shaders::fg::Uniforms(click_pos, time, scale);
         let buf = fg_buf_pool.next(uniforms).unwrap();
         let desc = fg_desc_pool
             .get_mut()

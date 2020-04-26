@@ -290,7 +290,8 @@ fn main() {
             (topright, bottomright, center, gray1),
             (bottomright, bottomleft, center, gray2),
             (bottomleft, topleft, center, gray3),
-            ([-0.125, -0.125], [0.125, -0.125], [0.0, 0.125], white),
+            ([0.0,  0.125], [-0.125, 0.0], [0.125, 0.0], white),
+            ([0.0, -0.125], [-0.125, 0.0], [0.125, 0.0], white),
         ])
     };
 

@@ -210,7 +210,7 @@ impl Game {
                     khr_swapchain: true,
                     ..DeviceExtensions::none()
                 },
-                std::iter::once((queue_family, 0.5)),
+                [(queue_family, 0.5)],
             )
             .expect("failed to create device");
             (dev, queues.next().unwrap())

@@ -81,7 +81,8 @@ struct Game {
 
 fn required_extensions(window: &Window) -> RawInstanceExtensions {
     window
-        .vulkan_instance_extensions().unwrap()
+        .vulkan_instance_extensions()
+        .unwrap()
         .into_iter()
         .map(|s| CString::new(s.as_bytes()).unwrap())
         .collect()
@@ -96,8 +97,10 @@ impl Game {
             .into_iter()
             .map(|image| {
                 Framebuffer::start(render_pass.clone())
-                    .add(image.clone()).unwrap()
-                    .build().unwrap()
+                    .add(image.clone())
+                    .unwrap()
+                    .build()
+                    .unwrap()
             })
             .map(|fb| Arc::new(fb) as Arc<dyn FramebufferAbstract + Send + Sync>)
             .collect()
@@ -142,7 +145,8 @@ impl Game {
             .blend_alpha_blending() // TODO: more customization
             .fragment_shader(fs.main_entry_point(), ())
             .render_pass(Subpass::from(self.render_pass.clone(), 0).unwrap())
-            .build(self.gpu.clone()).unwrap();
+            .build(self.gpu.clone())
+            .unwrap();
 
         Arc::new(pipeline)
     }
@@ -183,7 +187,8 @@ impl Game {
             .window("stupid horse", WIN_WIDTH, WIN_HEIGHT)
             .resizable()
             .vulkan()
-            .build().unwrap();
+            .build()
+            .unwrap();
 
         let exts = required_extensions(&window);
         let inst = Instance::new(None, exts, None).expect("failed to create instance");
@@ -255,7 +260,8 @@ impl Game {
                     }
                 },
                 pass: {color: [color], depth_stencil: {}}
-            ).unwrap(),
+            )
+            .unwrap(),
         );
 
         let framebuffers = Self::make_framebuffers(images, render_pass.clone());
@@ -365,7 +371,7 @@ fn main() {
     let horse_img = {
         let img = match image::open("horse.png").unwrap() {
             image::DynamicImage::ImageRgba8(i) => i,
-            x => panic!(x),
+            _ => panic!("unexpected image type"),
         };
 
         let (width, height) = img.dimensions();
@@ -438,7 +444,7 @@ fn main() {
                 rebuild_swapchain = true;
                 continue;
             }
-            Err(e) => panic!(e),
+            Err(e) => panic!("{e}"),
         };
 
         if suboptimal {
@@ -448,53 +454,68 @@ fn main() {
         let fb = game.framebuffers[image_num].clone();
 
         let triforce_desc = fg_desc_pool
-            .get_mut().unwrap()
+            .get_mut()
+            .unwrap()
             .next()
-            .add_buffer(fg_buf_pool.next(uniforms).unwrap()).unwrap()
-            .build().unwrap();
+            .add_buffer(fg_buf_pool.next(uniforms).unwrap())
+            .unwrap()
+            .build()
+            .unwrap();
 
         let horse_desc = horse_desc_pool
-            .get_mut().unwrap()
+            .get_mut()
+            .unwrap()
             .next()
-            .add_buffer(horse_buf_pool.next(uniforms).unwrap()).unwrap()
-            .add_sampled_image(horse_img.clone(), horse_sampler.clone()).unwrap()
-            .build().unwrap();
+            .add_buffer(horse_buf_pool.next(uniforms).unwrap())
+            .unwrap()
+            .add_sampled_image(horse_img.clone(), horse_sampler.clone())
+            .unwrap()
+            .build()
+            .unwrap();
 
         let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(
             game.gpu.clone(),
             game.queue.family(),
         )
         .unwrap()
-        .begin_render_pass(fb, false, vec![ClearValue::Float([0.105, 0.625, 0.0, 1.0])]).unwrap()
+        .begin_render_pass(fb, false, vec![ClearValue::Float([0.105, 0.625, 0.0, 1.0])])
+        .unwrap()
         .draw(
             bg_pipeline.clone(),
             &game.dyn_state,
             vec![bg_verts.clone()],
             (),
             (),
-        ).expect("bg draw call failed")
+        )
+        .expect("bg draw call failed")
         .draw(
             fg_pipeline.clone(),
             &game.dyn_state,
             vec![fg_verts.clone()],
             triforce_desc,
             (),
-        ).expect("fg draw call failed")
+        )
+        .expect("fg draw call failed")
         .draw(
             horse_pipeline.clone(),
             &game.dyn_state,
             vec![horse_verts.clone()],
             horse_desc,
             (),
-        ).expect("horse draw call failed")
-        .end_render_pass().unwrap()
-        .build().unwrap();
+        )
+        .expect("horse draw call failed")
+        .end_render_pass()
+        .unwrap()
+        .build()
+        .unwrap();
 
         let future = game
             .future
-            .take().unwrap()
+            .take()
+            .unwrap()
             .join(acquire_future)
-            .then_execute(game.queue.clone(), command_buffer).unwrap()
+            .then_execute(game.queue.clone(), command_buffer)
+            .unwrap()
             .then_swapchain_present(game.queue.clone(), game.swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 

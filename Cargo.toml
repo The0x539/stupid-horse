@@ -2,7 +2,7 @@
 name = "stupid-horse"
 version = "0.1.0"
 authors = ["The0x539"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 vulkano = "0.18"
